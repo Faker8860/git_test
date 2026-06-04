@@ -1,0 +1,70 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Daveatt
+
+// @version=4
+
+// https://www.tradingview.com/blog/en/use-an-input-from-another-indicator-with-your-strategy-19584/
+
+SystemName = "BEST Strategy Template"
+TradeId = "DAVE"
+// These values are used both in the strategy() header and in the script's relevant inputs as default values so they match.
+// Unless these values match in the script's Inputs and the TV backtesting Properties, results between them cannot be compared.
+InitCapital = 1000000
+InitPosition = 10.0
+InitCommission = 0.075
+InitPyramidMax = 3
+CalcOnorderFills = true
+
+strategy(title=SystemName, shorttitle=SystemName, 
+ overlay=true, pyramiding=InitPyramidMax, initial_capital=InitCapital, default_qty_type=strategy.percent_of_equity, 
+ default_qty_value=InitPosition, commission_type=strategy.commission.percent, commission_value=InitCommission, calc_on_order_fills=CalcOnorderFills, 
+ precision=6, max_lines_count=500, max_labels_count=500)
+
+// ————— You capture the Source of your indicator here
+ext_source_ = input(close, type=input.source, title="Data source")
+
+// Custom close signal
+custom_close = input(false, title="Use Custom Close?")
+
+// ————— Bar Coloring
+clrBars = input(true,title="Colour Candles to Trade Order state")
+
+CloseSession = input(false, title="Close positions at market at the end of each session ?")
+Session = input(title="Trading Session", type=input.session, defval="0000-2345")
+
+OpenDirection  = input(defval="ALL", title="Open  Trading Direction", options=["ALL", "LONG", "SHORT"])
+CloseDirection = input(defval="ALL", title="Close Trading Direction", options=["ALL", "LONG", "SHORT"])
+
+closeOnOpposite = input(true, title="Close on Opposite Signal")
+
+// ————— Date range filtering
+DateFilter = input(false, "═════════════ Date Range Filtering")
+
+// ————— Syntax coming from https://www.tradingview.com/blog/en/new-parameter-for-date-input-added-to-pine-21812/
+i_startTime = input(defval = timestamp("01 Jan 2019 13:30 +0000"), title = "Start Time", type = input.time)
+i_endTime = input(defval = timestamp("30 Dec 2021 23:30 +0000"), title = "End Time", type = input.time)
+
+TradeDateIsAllowed() => DateFilter ? time >= i_startTime and time <= i_endTime : true
+
+// ————— Set the max losing streak length with an input
+setmaxLosingStreak = input(title="═════════════ Set Max number of consecutive loss trades", type=input.bool, defval=false)
+maxLosingStreak = input(title="Max of consecutive loss trades", type=input.integer, defval=15, minval=1)
+
+setmaxWinStreak = input(title="═════════════ Set Max number of consecutive won trades", type=input.bool, defval=false)
+maxWinStreak = input(title="Max Winning Streak Length", type=input.integer, defval=15, minval=1)
+
+// ————— Set the max consecutive days with a loss
+setmaxLosingDaysStreak = input(title="═════════════ Set MAX consecutive days with a loss in a row", type=input.bool, defval=false)
+maxLosingDaysStreak = input(title="Max of consecutive days with a loss in a row", type=input.integer, defval=3, minval=1)
+
+setMaxDrawdown = input(title="═════════════ Set Max Total DrawDown", type=input.bool, defval=false)
+// ————— Input for the strategy's maximum drawdown (in % of strategy equity)
+maxPercDd = input(title="Max Drawdown (%)", type=input.integer, defval=10, minval=1, maxval=100)
+
+setMaxIntradayLoss = input(title="═════════════ Set Max Intraday Loss", type=input.bool, defval=false)
+// ————— Input for the strategy's maximum intraday loss (in % of strategy equity)
+maxIntradayLoss = input(title="Max Intraday Loss (%)", type=input.integer, defval=3, minval=1, maxval=100)
+
+
+setNumberDailyTrades = input(title="═════════════ Limit the number of trades per day", type=input.bool, defval=false)
+maxD

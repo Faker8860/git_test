@@ -1,0 +1,243 @@
+//@version=6
+//
+// ============================================================================
+// OCC Strategy v8.13 — TEMA(8) + 3x跨周期 + 5分钟延迟 + 本金÷市价
+//
+// 与 v8.12 唯一区别：lookahead_off（不用未来数据）
+// 这是 Python 实盘的策略逻辑，回测结果 = 实盘真实表现
+//
+// 配置：TEMA(8), 3x跨周期, lookahead_off, delayOffset=0
+// ============================================================================
+
+strategy(title = "OCC Strategy v8.13", shorttitle = "OCC-v8.13",
+  overlay = true, pyramiding = 0,
+  default_qty_type = strategy.fixed, default_qty_value = 1,
+  process_orders_on_close = true)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                    策略参数                                  ║
+// ╚══════════════════════════════════════════════════════════════╝
+useRes    = input.bool(true, title = "使用跨周期?")
+intRes    = input.int(3, title = "跨周期倍数", minval = 1, maxval = 10)
+_mult = timeframe.multiplier * intRes
+stratRes = if timeframe.ismonthly
+    str.tostring(_mult) + "M"
+else if timeframe.isweekly
+    str.tostring(_mult) + "W"
+else if timeframe.isdaily
+    str.tostring(_mult) + "D"
+else
+    str.tostring(_mult)
+
+basisType   = input.string("TEMA", title = "均线类型",
+              options = ["SMA", "EMA", "DEMA", "TEMA", "WMA", "VWMA", "SMMA", "HullMA", "LSMA", "ALMA", "SSMA", "TMA"])
+basisLen    = input.int(8, title = "均线周期", minval = 1)
+offsetSigma = input.int(6, title = "LSMA偏移 / ALMA Sigma", minval = 0)
+offsetALMA  = input.float(0.85, title = "ALMA偏移", minval = 0, step = 0.01)
+scolor      = input.bool(false, title = "K线着色?")
+delayOffset = input.int(0, title = "MA延迟偏移", minval = 0, step = 1)
+tradeType   = input.string("BOTH", title = "交易方向", options = ["LONG", "SHORT", "BOTH", "NONE"])
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          本金÷市价 = 仓位                                    ║
+// ╚══════════════════════════════════════════════════════════════╝
+capitalPerTrade = input.float(2000.0, title = "每笔本金(USD)", minval = 100.0, maxval = 100000.0, step = 100.0)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          信号延迟（默认5分钟）                                ║
+// ╚══════════════════════════════════════════════════════════════╝
+delayMinutes = input.int(5, title = "入场延迟(分钟)", options = [0, 5, 10, 15],
+                tooltip = "交叉信号出现后等N分钟再入场。0=立即入场")
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          止损止盈 & 回测范围                                  ║
+// ╚══════════════════════════════════════════════════════════════╝
+slPoints = input.int(0, title = "止损点数（0=禁用）", minval = 0)
+tpPoints = input.int(0, title = "止盈点数（0=禁用）", minval = 0)
+ebar     = input.int(10000, title = "回测K线数量（0=不限制）", minval = 0)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                    颜色                                      ║
+// ╚══════════════════════════════════════════════════════════════╝
+cGreen     = #008000
+cLime      = #00FF00
+cRed       = #FF0000
+cBlue      = #0000FF
+cDarkRed   = #8B0000
+cGray      = #808080
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          均线函数（v6 语法）                                  ║
+// ╚══════════════════════════════════════════════════════════════╝
+variant(string vtype, float src, int len, int offSig, float offALMA) =>
+    v1  = ta.sma(src, len)
+    v2  = ta.ema(src, len)
+    v3  = 2.0 * v2 - ta.ema(v2, len)
+    v4  = 3.0 * (v2 - ta.ema(v2, len)) + ta.ema(ta.ema(v2, len), len)
+    v5  = ta.wma(src, len)
+    v6  = ta.vwma(src, len)
+    v7  = 0.0
+    v7 := na(v7[1]) ? ta.sma(src, len) : (v7[1] * (len - 1) + src) / len
+    v8  = ta.wma(2.0 * ta.wma(src, len / 2) - ta.wma(src, len), math.round(math.sqrt(len)))
+    v9  = ta.linreg(src, len, offSig)
+    v10 = ta.alma(src, len, offALMA, offSig)
+    v11 = ta.sma(v1, len)
+    a1  = math.exp(-1.414 * 3.14159 / len)
+    b1  = 2.0 * a1 * math.cos(1.414 * 3.14159 / len)
+    c2  = b1
+    c3  = -a1 * a1
+    c1  = 1.0 - c2 - c3
+    v12 = 0.0
+    v12 := c1 * (src + nz(src[1])) / 2.0 + c2 * nz(v12[1]) + c3 * nz(v12[2])
+    switch vtype
+        "EMA"   => v2
+        "DEMA"  => v3
+        "TEMA"  => v4
+        "WMA"   => v5
+        "VWMA"  => v6
+        "SMMA"  => v7
+        "HullMA" => v8
+        "LSMA"  => v9
+        "ALMA"  => v10
+        "TMA"   => v11
+        "SSMA"  => v12
+        => v1
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          ★ 跨周期封装 — lookahead_off（实盘真实逻辑）          ║
+// ╚══════════════════════════════════════════════════════════════╝
+reso(float exp, bool use, string res) =>
+    use ? request.security(syminfo.tickerid, res, exp,
+      gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off) : exp
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          ★  核心计算                                          ║
+// ╚══════════════════════════════════════════════════════════════╝
+closeSeries = variant(basisType, close[delayOffset], basisLen, offsetSigma, offsetALMA)
+openSeries  = variant(basisType, open[delayOffset], basisLen, offsetSigma, offsetALMA)
+
+// 跨周期均线（lookahead_off → 只用已完成的高周期K线数据）
+closeSeriesAlt = reso(closeSeries, useRes, stratRes)
+openSeriesAlt  = reso(openSeries, useRes, stratRes)
+
+// 趋势方向
+isLongDir  = closeSeriesAlt > openSeriesAlt
+isShortDir = closeSeriesAlt < openSeriesAlt
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          ★  交叉信号                                         ║
+// ╚══════════════════════════════════════════════════════════════╝
+xlong  = ta.crossover(closeSeriesAlt, openSeriesAlt)
+xshort = ta.crossunder(closeSeriesAlt, openSeriesAlt)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          ★  信号延迟逻辑                                     ║
+// ╚══════════════════════════════════════════════════════════════╝
+chartMin = timeframe.isseconds ? timeframe.multiplier / 60.0 :
+           timeframe.isminutes ? timeframe.multiplier :
+           timeframe.isdaily   ? timeframe.multiplier * 1440 :
+           timeframe.isweekly  ? timeframe.multiplier * 10080 :
+           timeframe.ismonthly ? timeframe.multiplier * 43200 :
+           timeframe.multiplier
+
+delayBars = delayMinutes > 0 ? math.max(1, math.ceil(delayMinutes / chartMin)) : 0
+
+var int longSigBar = na
+var int shortSigBar = na
+
+if xlong
+    longSigBar := bar_index
+    shortSigBar := na
+if xshort
+    shortSigBar := bar_index
+    longSigBar := na
+
+if xshort and not na(longSigBar)
+    longSigBar := na
+if xlong and not na(shortSigBar)
+    shortSigBar := na
+
+longDelayOk  = delayMinutes == 0 ? xlong :
+               not na(longSigBar) and (bar_index - longSigBar) == delayBars and isLongDir
+shortDelayOk = delayMinutes == 0 ? xshort :
+               not na(shortSigBar) and (bar_index - shortSigBar) == delayBars and isShortDir
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          最终入场条件                                        ║
+// ╚══════════════════════════════════════════════════════════════╝
+longCond  = longDelayOk
+shortCond = shortDelayOk
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                    绘图                                      ║
+// ╚══════════════════════════════════════════════════════════════╝
+trendColour = isLongDir ? cGreen : cRed
+bcolour     = close > openSeriesAlt ? cLime : cRed
+barcolor(scolor ? bcolour : na, title = "K线着色")
+
+closeP = plot(closeSeriesAlt, title = "收盘均线(跨周期)",
+  color = color.new(trendColour, 20), linewidth = 2)
+openP  = plot(openSeriesAlt, title = "开盘均线(跨周期)",
+  color = color.new(trendColour, 20), linewidth = 2)
+fill(closeP, openP, color = color.new(trendColour, 85))
+
+// 入场信号
+plotshape(longCond, title = "做多", style = shape.triangleup,
+  location = location.belowbar, color = cLime, size = size.small)
+plotshape(shortCond, title = "做空", style = shape.triangledown,
+  location = location.abovebar, color = cRed, size = size.small)
+
+// 等待中的延迟信号（蓝色小圆点）
+plotshape(xlong and delayMinutes > 0 and not longCond, title = "等做多",
+  style = shape.circle, location = location.belowbar,
+  color = color.new(cBlue, 60), size = size.tiny)
+plotshape(xshort and delayMinutes > 0 and not shortCond, title = "等做空",
+  style = shape.circle, location = location.abovebar,
+  color = color.new(cBlue, 60), size = size.tiny)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                    策略执行                                  ║
+// ╚══════════════════════════════════════════════════════════════╝
+tradeQty = capitalPerTrade / close
+
+tdays = (timenow - time) / 60000.0
+tdays := timeframe.ismonthly ? tdays / 1440.0 / 5.0 / 4.3 / timeframe.multiplier :
+         timeframe.isweekly  ? tdays / 1440.0 / 5.0 / timeframe.multiplier :
+         timeframe.isdaily   ? tdays / 1440.0 / timeframe.multiplier :
+         tdays / timeframe.multiplier
+
+inBarRange = (ebar == 0 or tdays <= ebar) and tradeType != "NONE"
+
+TP = tpPoints > 0 ? tpPoints : na
+SL = slPoints > 0 ? slPoints : na
+
+if inBarRange
+    if longCond and tradeType != "SHORT"
+        strategy.entry("long", strategy.long, qty = tradeQty)
+
+    if shortCond and tradeType != "LONG"
+        strategy.entry("short", strategy.short, qty = tradeQty)
+
+    if shortCond and tradeType == "LONG"
+        strategy.close("long")
+    if longCond and tradeType == "SHORT"
+        strategy.close("short")
+
+    strategy.exit("XL", from_entry = "long", profit = TP, loss = SL)
+    strategy.exit("XS", from_entry = "short", profit = TP, loss = SL)
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║          版本记录                                             ║
+// ╠══════════════════════════════════════════════════════════════╣
+// ║                                                                 ║
+// ║  v8.13 = v8.12 + 两个改动:                                      ║
+// ║     ① lookahead_on → lookahead_off（不用未来数据,实盘真实表现）  ║
+// ║     ② 默认均线 SMMA → TEMA                                      ║
+// ║     ③ 去掉 alert()（Python 自己算信号,不需要 TV 告警）           ║
+// ║                                                                 ║
+// ║  与 Python strategy_bot.py 逻辑完全一致。                        ║
+// ║  回测结果 = Python 实盘真实表现。                                 ║
+// ║                                                                 ║
+// ╚══════════════════════════════════════════════════════════════╝
+
+// eof

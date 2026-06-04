@@ -1,0 +1,42 @@
+[
+  {
+    "time": "2026-05-25T14:15:15.402766+00:00",
+    "action": "short_entry",
+    "symbol": "ETHUSDT",
+    "side": "sell",
+    "contracts": 0.05,
+    "usdt_value": 100.0,
+    "price": 2000.0,
+    "order_id": "8389766188055854456"
+  },
+  {
+    "time": "2026-05-25T14:17:53.889583+00:00",
+    "action": "flip_close_short",
+    "symbol": "ETHUSDT",
+    "side": "buy",
+    "contracts": 0.05,
+    "usdt_value": 100.0,
+    "price": 2000.0,
+    "order_id": "8389766188057267108"
+  },
+  {
+    "time": "2026-05-25T14:20:15.419919+00:00",
+    "action": "exit_short",
+    "symbol": "ETHUSDT",
+    "side": "buy",
+    "contracts": 0.05,
+    "usdt_value": 100.0,
+    "price": 2000.0,
+    "order_id": "8389766188058899035"
+  },
+  {
+    "time": "2026-05-25T14:21:02.051790+00:00",
+    "action": "long_entry",
+    "symbol": "ETHUSDT",
+    "side": "buy",
+    "contracts": 0.05,
+    "usdt_value": 100.0,
+    "price": 2000.0,
+    "order_id": "8389766188059325542"
+  }
+]

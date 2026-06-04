@@ -1,0 +1,114 @@
+======================================================================
+  Deep Strategy Analysis — 2024-2025 Data
+======================================================================
+>>> Downloading ETHUSDT 15m (2024-2025)...
+  10000...
+  20000...
+  30000...
+  40000...
+  50000...
+  60000...
+  70000...
+  Total: 70176 candles
+
+======================================================================
+  1. TAKE-PROFIT OPTIMIZATION
+======================================================================
+  No TP -> $3,994 (+470.6%) DD:-62.0% WR:29.1% Pain:7.59 TPwins:0
+  TP=0.5% -> $283 (-59.6%) DD:-88.3% WR:71.5% Pain:-0.67 TPwins:4048
+  TP=1% -> $5,598 (+699.7%) DD:-79.8% WR:56.4% Pain:8.76 TPwins:2278
+  TP=1.5% -> $6,815 (+873.6%) DD:-69.1% WR:45.7% Pain:12.64 TPwins:1465
+  TP=2% -> $4,749 (+578.4%) DD:-68.0% WR:39.0% Pain:8.51 TPwins:1022
+  TP=2.5% -> $1,030 (+47.1%) DD:-75.0% WR:34.4% Pain:0.63 TPwins:735
+  TP=3% -> $1,551 (+121.5%) DD:-73.9% WR:32.3% Pain:1.65 TPwins:579
+  TP=4% -> $1,509 (+115.6%) DD:-75.8% WR:30.8% Pain:1.52 TPwins:351
+  TP=5% -> $4,291 (+513.0%) DD:-69.1% WR:30.4% Pain:7.42 TPwins:237
+  TP=7% -> $3,762 (+437.4%) DD:-67.5% WR:29.5% Pain:6.48 TPwins:117
+  TP=10% -> $3,794 (+441.9%) DD:-68.5% WR:29.1% Pain:6.46 TPwins:51
+
+  Best return: TP=1.5% -> $6,815 (+873.6%) DD:-69.1%
+  Best pain:   TP=1.5% -> Pain:12.64
+
+======================================================================
+  2. TIME PATTERN ANALYSIS (with best TP)
+======================================================================
+
+--- PnL by Day of Week ---
+  Mon: +4947U  WR=55%  trades=520
+  Tue: -1704U  WR=47%  trades=500
+  Wed: +382U  WR=46%  trades=491
+  Thu: +1166U  WR=47%  trades=479
+  Fri: +2180U  WR=48%  trades=490
+  Sat: -2163U  WR=33%  trades=371
+  Sun: +1298U  WR=40%  trades=460
+
+--- PnL by Hour (Beijing Time) ---
+    Hour        PnL  WinRate   Trades   AvgPnL
+  22:00      +2192U   53.8%    199      +11U
+  23:00      +1681U   52.7%    169      +10U
+  12:00      +1583U   50.4%    115      +14U
+   7:00      +1105U   43.8%    128       +9U
+  16:00      +1090U   48.1%    156       +7U
+   4:00       +944U   53.3%    135       +7U
+  21:00       +887U   49.2%    185       +5U
+  11:00       +860U   44.6%    130       +7U
+  ...
+   3:00       -689U   43.3%    141       -5U
+   6:00       -695U   41.2%    136       -5U
+  17:00      -1426U   36.3%    113      -13U
+   5:00      -2277U   40.8%    130      -18U
+
+--- PnL by Month ---
+  Month  1:    -1081U  WR=42%  trades=283
+  Month  2:     +580U  WR=50%  trades=263
+  Month  3:     +348U  WR=48%  trades=312
+  Month  4:     -476U  WR=51%  trades=285
+  Month  5:     +953U  WR=46%  trades=285
+  Month  6:     +475U  WR=41%  trades=244
+  Month  7:    +2199U  WR=47%  trades=282
+  Month  8:    +2745U  WR=53%  trades=259
+  Month  9:    +2454U  WR=40%  trades=244
+  Month 10:     -548U  WR=42%  trades=272
+  Month 11:    -1864U  WR=47%  trades=299
+  Month 12:     +322U  WR=43%  trades=283
+
+--- Exit Type Analysis ---
+  TP: +137827U total  avg=+94U  count=1465
+  SL: -10424U total  avg=-316U  count=33
+  FLIP: -121298U total  avg=-67U  count=1813
+
+--- Trade Duration (bars held) ---
+  Win avg duration:  17.0 bars (4.2 hours)
+  Loss avg duration: 20.3 bars (5.1 hours)
+  Max win duration:  138 bars
+  Max loss duration: 110 bars
+
+======================================================================
+  3. CONSECUTIVE WIN/LOSS PATTERNS
+======================================================================
+  Max win streak:  19
+  Max loss streak: 17
+  Avg win streak:  2.1
+  Avg loss streak: 2.5
+
+  PnL of next trade after loss streak:
+    After 1 losses: next avg PnL = +89U (712 trades)
+    After 2 losses: next avg PnL = +89U (409 trades)
+    After 3 losses: next avg PnL = +87U (255 trades)
+    After 4 losses: next avg PnL = +90U (166 trades)
+    After 5 losses: next avg PnL = +88U (96 trades)
+
+======================================================================
+  4. VOLATILITY CONTEXT (ATR at entry)
+======================================================================
+  PnL by ATR range at entry:
+    ATR <0.3%: avg PnL=+4U  WR=31%  n=636
+    ATR 0.3-0.5%: avg PnL=+4U  WR=43%  n=1217
+    ATR 0.5-0.8%: avg PnL=-5U  WR=50%  n=1004
+    ATR 0.8-1.2%: avg PnL=+10U  WR=60%  n=337
+    ATR 1.2-2.0%: avg PnL=+3U  WR=75%  n=103
+    ATR >2.0%: avg PnL=-11U  WR=64%  n=14
+
+======================================================================
+  ANALYSIS COMPLETE
+======================================================================

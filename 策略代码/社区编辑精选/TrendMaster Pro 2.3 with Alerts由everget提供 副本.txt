@@ -1,0 +1,91 @@
+//@version=6
+strategy("TrendMaster Pro 2.3 with Alerts", max_lines_count = 500, overlay = true)
+
+// === TrendMaster Pro 2.3 Settings ===
+// Dropdown menu for MA type (with names, defaulting to SMA)
+maType = input.string("SMA", title="MA Type", options=["EMA", "SMA", "SMMA"], group="MA Settings", 
+     tooltip="Select the type of Moving Average: EMA, SMA, or SMMA.")
+
+// Trend filter settings (disabled by default)
+enableTrendFilter = input.bool(false, title="Enable Higher Timeframe Trend", group="Higher Timeframe Trend", 
+     tooltip="If enabled, only trades in the trend direction will be executed.")
+trendMaType = input.string("EMA", title="Trend MA Type", options=["EMA", "SMA", "SMMA"], group="Higher Timeframe Trend", 
+     tooltip="Select the type of Moving Average for the higher timeframe trend.")
+trendMaLength = input.int(50, title="Trend MA Length", group="Higher Timeframe Trend", 
+     tooltip="The length of the Moving Average for the higher timeframe trend.")
+
+// Cross settings (only EMA settings visible)
+shortMALength = input.int(9, title="Short-Term MA Length", group="MA Settings", 
+     tooltip="The length of the short Moving Average used for signal generation.")
+longMALength = input.int(21, title="Long-Term MA Length", group="MA Settings", 
+     tooltip="The length of the long Moving Average used for signal generation.")
+
+// === Fixed Values for Hidden Settings ===
+// ATR Settings (fixed)
+atrLength = 14
+useAtrMultiplier = true
+atrMultiplierSL = 2.0
+
+// Bollinger Bands Settings (fixed)
+useVolatilityFilter = true
+useTrendFilter = true
+bbLength = 20
+bbMultiplier = 2.0
+
+// RSI Settings (fixed)
+useRSI = true
+rsiLength = 14
+rsiLongThreshold = 55
+rsiShortThreshold = 45
+
+// MACD Settings (fixed)
+useMACD = true
+macdFastLength = 12
+macdSlowLength = 26
+macdSignalSmoothing = 9
+
+// Stochastic Settings (
+useStochastic = true
+stochLength = 14
+stochSmoothing = 3
+stochOverbought = 80
+stochOversold = 20
+
+// ADX Settings (fixed)
+useADX = true
+adxLength = 14
+adxThreshold = 25
+
+// Fixed Values for TP/SL
+riskRewardRatio = 2.0  // Fixed value for the risk-reward ratio
+slTicksOffset = 5      // Fixed value for the SL ticks offset
+
+// === Band Power Settings ===
+bandLength = input.int(20, title="Band Length", minval=1, group="Band Power", tooltip="The length of the bands. A higher length smooths the bands more but reacts slower to price changes.")
+bandType = input.int(2, title="Band Type", options=[1, 2, 3], group="Band Power", 
+     tooltip="1 = Fast, more noise, good for volatile markets.\n2 = Medium, balanced, good for general use.\n3 = Slow, very smooth, good for calm markets.")
+
+// === Support & Resistance Settings ===
+showSupportResistance = input.bool(false, title="Show Support & Resistance", group="Support & Resistance")
+pivotTypeInput = input.string(title="Calculation Method", defval="Traditional", options=["Traditional", "Fibonacci", "Woodie", "Classic", "DM", "Camarilla"], group="Support & Resistance")
+pivotAnchorInput = input.string(title="Timeframe", defval="Auto", options=["Auto", "Daily", "Weekly", "Monthly", "Quarterly", "Yearly", "Biyearly", "Triyearly", "Quinquennially", "Decennially"], group="Support & Resistance")
+isDailyBasedInput = input.bool(title="Use Daily-Based Values", defval=true, group="Support & Resistance", tooltip="If disabled, the support/resistance levels use intraday data for calculations on intraday charts.")
+maxHistoricalPivotsInput = input.int(title="Number of Historical Levels", defval=1, minval=1, maxval=200, group="Support & Resistance")
+
+// Display Options
+showLabelsInput = input.bool(title="Show Labels", defval=true, group="Display Options")
+showPricesInput = input.bool(title="Show Prices", defval=true, group="Display Options")
+positionLabelsInput = input.string("Left", "Label Position", options=["Left", "Right"], group="Display Options")
+linewidthInput = input.int(title="Line Width", defval=1, minval=1, maxval=100, group="Display Options")
+
+// Colors
+var DEFAULT_COLOR = #FB8C00
+pColorInput = input.color(DEFAULT_COLOR, "Midline", inline="Midline", group="Colors")
+pShowInput = input.bool(true, "", inline="Midline", group="Colors")
+s1ColorInput = input.color(DEFAULT_COLOR, "S1", inline="S1/R1", group="Colors")
+s1ShowInput = input.bool(true, "", inline="S1/R1", group="Colors")
+r1ColorInput = input.color(DEFAULT_COLOR, "R1", inline="S1/R1", group="Colors")
+r1ShowInput = input.bool(true, "", inline="S1/R1", group="Colors")
+s2ColorInput = input.color(DEFAULT_COLOR, "S2", inline="S2/R2", group="Colors")
+s2ShowInput = input.bool(true, "", inline="S2/R2", group="Colors")
+r2ColorInput 

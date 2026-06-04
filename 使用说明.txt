@@ -1,0 +1,24 @@
+量化交易系统 分享版
+========================
+
+启动步骤：
+1. 安装 Python 依赖：pip install ccxt pandas numpy python-dotenv
+2. 复制 .env.example 为 .env，填入你的币安 API Key
+3. 运行 web_ui.py 启动看板
+4. 打开浏览器访问 http://localhost:8000
+
+策略配置：
+- strategy_bot.py 是核心交易机器人
+- strategies.json 是策略参数（可调整仓位、止盈止损等）
+- 回测脚本/ 目录包含历史数据回测工具
+
+当前策略：Volty EMA50 + RSI方向确认 + 动态仓位 + TP7%
+- 仓位: 60% × 3x 杠杆
+- 止损: 5%
+- 止盈: 7%
+- 趋势过滤: EMA50
+
+回测结果/ 目录包含6.5年历史回测数据
+
+原项目路径：C:\Users\周勇\Desktop\量化交易
+云端部署：47.76.187.153（需SSH访问）

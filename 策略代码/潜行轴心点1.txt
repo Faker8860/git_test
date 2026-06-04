@@ -1,0 +1,128 @@
+//@version=5
+strategy("潜行轴心点策略", overlay=true,
+         initial_capital=10000,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=100,
+         pyramiding=0,
+         max_lines_count=500,
+         max_labels_count=500)
+
+// ========== 参数 ==========
+atrPeriod      = input.int(14, "ATR周期", minval=5, maxval=50)
+zoneTolMult    = input.float(0.3, "区域容差(ATR倍数)", minval=0.1, maxval=2.0, step=0.1)
+strongBodyMult = input.float(1.5, "强势K线实体倍数", minval=1.0, maxval=5.0, step=0.1)
+lookbackBars   = input.int(96, "摆动回看K线数", minval=24, maxval=500, tooltip="向左回看多少根K线找摆动高/低点")
+useSwingLevels = input.bool(true, "启用摆动高低点", tooltip="在区间高低点之外，额外使用摆动高低点作为买卖线")
+rrRatio        = input.float(2.0, "盈亏比", minval=1.0, maxval=5.0, step=0.1)
+showLines      = input.bool(true, "显示买卖四线")
+showSignals    = input.bool(true, "显示信号标记")
+
+// ========== 计算昨日高低点（区间高低点） ==========
+dHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+dLow  = request.security(syminfo.tickerid, "D", low[1],  lookahead=barmerge.lookahead_off)
+
+// ========== 摆动高低点（向左回看N根K线） ==========
+sHigh = ta.highest(high, lookbackBars + 1)
+sLow  = ta.lowest(low,  lookbackBars + 1)
+
+// ========== ATR ==========
+atrVal = ta.atr(atrPeriod)
+zoneTol = atrVal * zoneTolMult
+
+// ========== 买卖四线 ==========
+sellLine1 = dHigh                                          // 区间高点 → 卖出线
+sellLine2 = useSwingLevels ? math.max(dHigh, sHigh) : na   // 摆动高点 → 卖出线
+buyLine1  = dLow                                           // 区间低点 → 买入线
+buyLine2  = useSwingLevels ? math.min(dLow, sLow) : na     // 摆动低点 → 买入线
+
+// ========== K线强度判断 ==========
+body = math.abs(close - open)
+avgBody = ta.sma(body, 20)
+isStrong = body > avgBody * strongBodyMult
+
+// ========== 价格到达区域 ==========
+isAtBuyZone(_low) =>
+    near1 = math.abs(_low - buyLine1) <= zoneTol
+    near2 = useSwingLevels and math.abs(_low - buyLine2) <= zoneTol
+    near1 or near2
+
+isAtSellZone(_high) =>
+    near1 = math.abs(_high - sellLine1) <= zoneTol
+    near2 = useSwingLevels and math.abs(_high - sellLine2) <= zoneTol
+    near1 or near2
+
+// ========== 做多信号（3K线模式） ==========
+// K线1: 强势阴线到达买入区域
+strongBearToBuy = isStrong and close < open and isAtBuyZone(low)
+// K线2: 反转阳线（下一根K线走反方向）
+revBull = close > open and strongBearToBuy[1]
+// K线3: 在K线2收盘时，挂stop买单于K线2最高价，K线3期间触发则成交
+
+// ========== 做空信号（3K线模式） ==========
+// K线1: 强势阳线到达卖出区域
+strongBullToSell = isStrong and close > open and isAtSellZone(high)
+// K线2: 反转阴线
+revBear = close < open and strongBullToSell[1]
+// K线3: 在K线2收盘时，挂stop卖单于K线2最低价，K线3期间触发则成交
+
+// ========== 执行交易 ==========
+// 做多：在反转K线（K线2）收盘后，挂止损买入单（stop=K线2最高价）
+if revBull and strategy.position_size <= 0
+    triggerPrice = high              // K线2的最高价 = 潜行轴买入触发价
+    slLevel = math.min(low[1], low)  // K线1和K线2的最低影线
+    tpLevel = triggerPrice + (triggerPrice - slLevel) * rrRatio
+    strategy.cancel_all()
+    strategy.entry("Long", strategy.long, stop=triggerPrice)
+    strategy.exit("Long Exit", "Long", stop=slLevel, limit=tpLevel)
+
+// 做空：在反转K线（K线2）收盘后，挂止损卖出单（stop=K线2最低价）
+if revBear and strategy.position_size >= 0
+    triggerPrice = low               // K线2的最低价 = 潜行轴卖出触发价
+    slLevel = math.max(high[1], high) // K线1和K线2的最高影线
+    tpLevel = triggerPrice - (slLevel - triggerPrice) * rrRatio
+    strategy.cancel_all()
+    strategy.entry("Short", strategy.short, stop=triggerPrice)
+    strategy.exit("Short Exit", "Short", stop=slLevel, limit=tpLevel)
+
+// ========== 绘图 ==========
+// 买卖四线
+plot(showLines ? sellLine1 : na, "区间高点", color=color.new(color.red, 0), linewidth=1, style=plot.style_circles)
+plot(showLines ? buyLine1  : na, "区间低点", color=color.new(color.green, 0), linewidth=1, style=plot.style_circles)
+plot(showLines ? sellLine2 : na, "摆动高点", color=color.new(color.maroon, 40), linewidth=1, style=plot.style_circles)
+plot(showLines ? buyLine2  : na, "摆动低点", color=color.new(color.teal, 40), linewidth=1, style=plot.style_circles)
+
+// 区域背景色
+bgColorBuy  = isAtBuyZone(low)  ? color.new(color.green, 93) : na
+bgColorSell = isAtSellZone(high) ? color.new(color.red, 93)   : na
+bgcolor(bgColorBuy,  title="买入区域")
+bgcolor(bgColorSell, title="卖出区域")
+
+// 信号标记
+plotshape(showSignals and strongBearToBuy, "①强阴到买区", shape.triangledown, location.abovebar, color.red, size=size.small, offset=0)
+plotshape(showSignals and revBull, "②反转阳", shape.triangleup, location.belowbar, color.green, size=size.small, offset=0)
+plotshape(showSignals and revBear, "②反转阴", shape.triangledown, location.abovebar, color.red, size=size.small, offset=0)
+plotshape(showSignals and strongBullToSell, "①强阳到卖区", shape.triangleup, location.belowbar, color.green, size=size.small, offset=0)
+
+// 在K线2上标注潜行轴触发价和止损价
+if revBull
+    label.new(bar_index, high, "潜行轴买入\n" + str.tostring(high) + "\n止损 " + str.tostring(math.min(low[1], low)),
+              color=color.green, textcolor=color.white, style=label.style_label_up, yloc=yloc.abovebar, size=size.small)
+if revBear
+    label.new(bar_index, low, "潜行轴卖出\n" + str.tostring(low) + "\n止损 " + str.tostring(math.max(high[1], high)),
+              color=color.red, textcolor=color.white, style=label.style_label_down, yloc=yloc.belowbar, size=size.small)
+
+// ========== 信息面板 ==========
+var table infoTable = table.new(position.top_right, 3, 5,
+                                 bgcolor=color.new(color.black, 80),
+                                 border_color=color.new(color.white, 30),
+                                 border_width=1)
+if barstate.islast
+    table.cell(infoTable, 0, 0, "潜行轴心点策略", text_color=color.yellow, text_size=size.large)
+    table.cell(infoTable, 0, 1, "买入线1（区间低）", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(buyLine1, "#.##"), text_color=color.green)
+    table.cell(infoTable, 0, 2, "买入线2（摆动低）", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(buyLine2, "#.##"), text_color=color.teal)
+    table.cell(infoTable, 0, 3, "卖出线1（区间高）", text_color=color.white)
+    table.cell(infoTable, 1, 3, str.tostring(sellLine1, "#.##"), text_color=color.red)
+    table.cell(infoTable, 0, 4, "卖出线2（摆动高）", text_color=color.white)
+    table.cell(infoTable, 1, 4, str.tostring(sellLine2, "#.##"), text_color=color.maroon)

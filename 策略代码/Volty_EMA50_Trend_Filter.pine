@@ -1,0 +1,30 @@
+//@version=6
+// Volty Expan Close + EMA50 Trend Filter
+// Exact match: strategy_bot.py compute_signals_volty + EMA50 filter
+strategy("Volty EMA50 [Quant]", overlay=true,
+     initial_capital=686,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     process_orders_on_close=true,
+     commission_value=0.04,
+     slippage=2)
+
+atrLen   = input.int(5, "ATR Length")
+numATRs  = input.float(0.75, "ATR Multiplier", step=0.05)
+emaLen   = input.int(50, "Trend EMA Length")
+atrs     = ta.sma(ta.tr, atrLen) * numATRs
+ema50    = ta.ema(close, emaLen)
+
+bullTrend = close > ema50
+bearTrend = close < ema50
+
+if not na(close[atrLen])
+    if bullTrend
+        strategy.entry("Long", strategy.long, stop=close+atrs)
+    if bearTrend
+        strategy.entry("Short", strategy.short, stop=close-atrs)
+
+plot(ema50, "EMA50", color=color.orange, linewidth=2)
+plot(close+atrs, "Long Stop", color=color.new(color.green, 70), linewidth=1, style=plot.style_circles)
+plot(close-atrs, "Short Stop", color=color.new(color.red, 70), linewidth=1, style=plot.style_circles)
+bgcolor(bullTrend ? color.new(color.green, 90) : bearTrend ? color.new(color.red, 90) : na)
