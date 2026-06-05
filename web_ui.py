@@ -1182,6 +1182,19 @@ label { display:block; font-size:11px; color:var(--text); margin-bottom:4px; mar
   </div>
 </div>
 
+<!-- Management Password Modal (legacy) -->
+<div class="modal-overlay" id="pwdModal">
+  <div class="modal">
+    <h3>验证密码</h3>
+    <input type="password" id="pwdInput" placeholder="输入管理密码">
+    <div class="error-msg" id="pwdError">密码错误</div>
+    <div class="btn-row">
+      <button class="btn btn-outline btn-sm" onclick="cancelPwd()">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="confirmPwd()">确认</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── Auth Check ──
 if(!localStorage.getItem('token')){ window.location.href='/'; }
@@ -1299,6 +1312,29 @@ async function updateBotStatus(){
   if(el){el.className='badge '+(d.running?'on':'off');el.textContent=d.running?'在线':'离线';}
 }
 setInterval(updateBotStatus,10000);updateBotStatus();
+
+// ── Legacy Management Password Modal ──
+function showPwdModal(callback){
+  pwdCallback=callback;
+  document.getElementById('pwdModal').classList.add('show');
+  document.getElementById('pwdInput').value='';
+  document.getElementById('pwdError').style.display='none';
+  setTimeout(()=>document.getElementById('pwdInput').focus(),100);
+}
+function cancelPwd(){
+  document.getElementById('pwdModal').classList.remove('show');
+  pwdCallback=null;
+}
+async function confirmPwd(){
+  const pwd=document.getElementById('pwdInput').value;
+  const r=await api('/verify-password',{method:'POST',body:JSON.stringify({password:pwd})});
+  if(r.ok){
+    document.getElementById('pwdModal').classList.remove('show');
+    if(pwdCallback){pwdCallback();pwdCallback=null;}
+  }else{
+    document.getElementById('pwdError').style.display='block';
+  }
+}
 
 // ── Init ──
 loadProfileUI();
