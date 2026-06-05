@@ -21,6 +21,12 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 
+from db import (
+    register_user, login_user, get_user_by_token, logout_user,
+    get_user_dir, ensure_user_dir, init_preset_accounts,
+    reset_password, hash_password as db_hash_password,
+)
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     """多线程 HTTP Server，支持并发请求."""
     daemon_threads = True
@@ -37,21 +43,117 @@ ENV_FILE = BASE_DIR / ".env"
 WATCH_FILE = BASE_DIR / "watchlist.json"
 STRATEGIES_FILE = BASE_DIR / "strategies.json"
 
+
+def _user_file(username: str | None, filename: str) -> Path:
+    """获取用户专属文件路径，用户为空时回退到根目录."""
+    if username:
+        d = ensure_user_dir(username)
+        return d / filename
+    return BASE_DIR / filename
+
+
 PORT = int(os.getenv("UI_PORT", "8000"))
 
-# ── 币安连接（10 秒超时，避免无 VPN 时卡死）──
-public_binance = ccxt.binance({"enableRateLimit": True, "timeout": 10000})
+# ── 代理配置 ──
+PROXY_URL = os.getenv("PROXY_URL", "")  # 本地代理 URL，如 http://127.0.0.1:7890
+_proxies = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
+# ── 币安连接（ccxt timeout 单位是毫秒，30000=30秒）──
+public_binance = ccxt.binance({"enableRateLimit": True, "timeout": 30000, "options": {"defaultType": "swap"}})
+if _proxies:
+    public_binance.session.proxies.update(_proxies)
+if os.getenv("BINANCE_API_URL"):
+    public_binance.urls["api"] = os.getenv("BINANCE_API_URL")
+
+# 启动时预热：加载市场数据（通过代理首次请求较慢，提前加载避免后续超时）
 try:
-    private_binance = ccxt.binance({
-        "apiKey": os.getenv("BINANCE_API_KEY"),
-        "secret": os.getenv("BINANCE_SECRET_KEY"),
-        "enableRateLimit": True,
-        "timeout": 10000,
-        "options": {"defaultType": "swap"},
-    })
-except Exception:
-    private_binance = None
+    public_binance.load_markets()
+    print(f"[启动] 市场数据加载完成，共 {len(public_binance.markets)} 个市场")
+except Exception as e:
+    print(f"[启动] 市场数据加载失败（VPN/代理正常吗?）: {e}")
+
+# ── 用户专属 Binance 客户端缓存 ──
+_user_private_clients: dict = {}  # username -> ccxt.binance 或 None
+_user_public_clients: dict = {}   # username -> ccxt.binance (公开行情，走用户代理)
+_user_client_times: dict = {}     # username -> last_use_timestamp
+
+
+def _get_user_api_keys(username: str) -> dict:
+    """读取用户 .env 中的 API 密钥."""
+    env_file = _user_file(username, ".env")
+    result = {"apiKey": "", "secretKey": "", "proxyUrl": ""}
+    try:
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("BINANCE_API_KEY="):
+                    result["apiKey"] = line.split("=", 1)[1].strip()
+                elif line.startswith("BINANCE_SECRET_KEY="):
+                    result["secretKey"] = line.split("=", 1)[1].strip()
+                elif line.startswith("PROXY_URL="):
+                    result["proxyUrl"] = line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    # 不回退到根目录，每个用户必须配置自己的密钥
+    return result
+
+
+def _get_private_binance(username: str):
+    """获取或创建用户专属的 Binance 私有客户端（5 分钟缓存）."""
+    now = time.time()
+    if username in _user_private_clients:
+        if now - _user_client_times.get(username, 0) < 300:
+            _user_client_times[username] = now
+            return _user_private_clients[username]
+
+    keys = _get_user_api_keys(username)
+    api_key = keys["apiKey"]
+    api_secret = keys["secretKey"]
+    proxy_url = keys["proxyUrl"]
+
+    if not api_key or not api_secret:
+        _user_client_times[username] = now
+        _user_private_clients[username] = None
+        return None
+
+    try:
+        client = ccxt.binance({
+            "apiKey": api_key,
+            "secret": api_secret,
+            "enableRateLimit": True,
+            "timeout": 30000,
+            "options": {"defaultType": "swap"},
+        })
+        if proxy_url:
+            client.session.proxies.update({"http": proxy_url, "https": proxy_url})
+        if os.getenv("BINANCE_API_URL"):
+            client.urls["api"] = os.getenv("BINANCE_API_URL")
+        _user_private_clients[username] = client
+    except Exception:
+        _user_private_clients[username] = None
+
+    _user_client_times[username] = now
+    return _user_private_clients[username]
+
+
+def _get_public_binance(username: str):
+    """获取用户专属的公网 Binance 客户端（走用户代理）."""
+    if username in _user_public_clients:
+        return _user_public_clients[username]
+    keys = _get_user_api_keys(username)
+    proxy_url = keys.get("proxyUrl", "")
+    if not proxy_url:
+        _user_public_clients[username] = public_binance  # 回退到共享客户端
+        return public_binance
+    try:
+        client = ccxt.binance({"enableRateLimit": True, "timeout": 30000, "options": {"defaultType": "swap"}})
+        client.session.proxies.update({"http": proxy_url, "https": proxy_url})
+        client.load_markets()
+        _user_public_clients[username] = client
+    except Exception:
+        _user_public_clients[username] = public_binance
+    return _user_public_clients[username]
+
 
 # ── 缓存 ──
 _ticker_cache = {}
@@ -62,7 +164,7 @@ _binance_ok = True  # Binance 是否可达
 _binance_check_time = 0
 
 
-def load_env():
+def load_env(username=None):
     cfg = {
         "SYMBOLS": "ETHUSDT,BTCUSDT", "MA_TYPE": "TEMA", "MA_LEN": "8",
         "CROSS_MULT": "3", "TIMEFRAME_MINUTES": "1", "DELAY_MINUTES": "5",
@@ -72,8 +174,9 @@ def load_env():
         "STRATEGY_TYPE": "TEMA", "VOLTY_LENGTH": "5", "VOLTY_ATR_MULT": "0.75",
         "MARGIN_MODE": "isolated",
     }
+    env_file = _user_file(username, ".env")
     try:
-        with open(ENV_FILE, "r", encoding="utf-8") as f:
+        with open(env_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
@@ -85,10 +188,11 @@ def load_env():
     return cfg
 
 
-def save_env(form_data: dict):
+def save_env(form_data: dict, username=None):
+    env_file = _user_file(username, ".env")
     api_key, api_sec = "", ""
     try:
-        with open(ENV_FILE, "r", encoding="utf-8") as f:
+        with open(env_file, "r", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("BINANCE_API_KEY="):
                     api_key = line.split("=", 1)[1].strip()
@@ -121,13 +225,14 @@ def save_env(form_data: dict):
         f"TRADE_TYPE={form_data['TRADE_TYPE']}",
         f"ACTIVATION_DELAY_MINUTES={form_data.get('ACTIVATION_DELAY_MINUTES', '0')}",
     ]
-    with open(ENV_FILE, "w", encoding="utf-8") as f:
+    with open(env_file, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
 
-def load_trades():
+def load_trades(username=None):
+    trade_file = _user_file(username, "trades.json")
     try:
-        with open(TRADE_FILE, "r", encoding="utf-8") as f:
+        with open(trade_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         # 去重：相同 symbol + contracts + price + time(HH:MM) 只保留一条
         seen = set()
@@ -144,21 +249,24 @@ def load_trades():
         return []
 
 
-def save_trades(trades):
-    with open(TRADE_FILE, "w", encoding="utf-8") as f:
+def save_trades(trades, username=None):
+    trade_file = _user_file(username, "trades.json")
+    with open(trade_file, "w", encoding="utf-8") as f:
         json.dump(trades, f, ensure_ascii=False, indent=2)
 
 
-def load_positions():
+def load_positions(username=None):
+    state_file = _user_file(username, "strategy_state.json")
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
+        with open(state_file, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
 
 
-def save_positions(pos):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
+def save_positions(pos, username=None):
+    state_file = _user_file(username, "strategy_state.json")
+    with open(state_file, "w", encoding="utf-8") as f:
         json.dump(pos, f, ensure_ascii=False, indent=2)
 
 
@@ -231,9 +339,10 @@ def sync_manual_exits(exchange_positions, local_positions, trades):
             modified = True
 
     return modified, closed_syms
-def load_logs(n=100):
+def load_logs(n=100, username=None):
+    log_file = _user_file(username, "strategy.log")
     try:
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
+        with open(log_file, "r", encoding="utf-8") as f:
             lines = f.readlines()[-n:]
             lines.reverse()
             return "".join(lines)
@@ -241,30 +350,34 @@ def load_logs(n=100):
         return ""
 
 
-def load_watchlist():
+def load_watchlist(username=None):
+    watch_file = _user_file(username, "watchlist.json")
     try:
-        with open(WATCH_FILE, "r") as f:
+        with open(watch_file, "r") as f:
             return json.load(f)
     except Exception:
         return ["ETHUSDT", "BTCUSDT"]
 
 
-def save_watchlist(data):
-    with open(WATCH_FILE, "w") as f:
+def save_watchlist(data, username=None):
+    watch_file = _user_file(username, "watchlist.json")
+    with open(watch_file, "w") as f:
         json.dump(data, f)
 
 
-def load_strategies():
+def load_strategies(username=None):
     """加载策略配置列表."""
+    strategies_file = _user_file(username, "strategies.json")
     try:
-        with open(STRATEGIES_FILE, "r") as f:
+        with open(strategies_file, "r") as f:
             return json.load(f)
     except Exception:
         return []
 
 
-def save_strategies(data):
-    with open(STRATEGIES_FILE, "w") as f:
+def save_strategies(data, username=None):
+    strategies_file = _user_file(username, "strategies.json")
+    with open(strategies_file, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
@@ -311,33 +424,45 @@ def kill_bot_windows():
         pass
 
 
-def is_bot_running():
-    """检测 strategy_bot.py 是否在运行（跨平台）."""
+def is_bot_running(username=None):
+    """检测 strategy_bot.py 是否在运行（跨平台），可选按用户过滤."""
     try:
         if sys.platform == "win32":
             result = subprocess.run(
                 ['wmic', 'process', 'where', 'name like "python%.exe"',
                  'get', 'commandline', '/format:csv'],
                 capture_output=True, text=True, timeout=5)
-            return "strategy_bot.py" in result.stdout
+            for line in result.stdout.split('\n'):
+                if 'strategy_bot.py' in line:
+                    if username and f'--user {username}' not in line:
+                        continue
+                    return True
+            return False
         else:
-            result = subprocess.run(
-                ["pgrep", "-f", "strategy_bot.py"],
-                capture_output=True, text=True, timeout=5)
+            if username:
+                result = subprocess.run(
+                    ["pgrep", "-f", f"strategy_bot.py.*--user {username}"],
+                    capture_output=True, text=True, timeout=5)
+            else:
+                result = subprocess.run(
+                    ["pgrep", "-f", "strategy_bot.py"],
+                    capture_output=True, text=True, timeout=5)
             return len(result.stdout.strip()) > 0
     except Exception:
         return False
 
 
-def restart_bot():
+def restart_bot(username=None):
     if sys.platform == "win32":
         kill_bot_windows()
     else:
         subprocess.run(["pkill", "-f", "strategy_bot.py"], capture_output=True)
     time.sleep(1)
+    args = [sys.executable, str(BASE_DIR / "strategy_bot.py")]
+    if username:
+        args.extend(["--user", username])
     subprocess.Popen(
-        [sys.executable, str(BASE_DIR / "strategy_bot.py")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=str(BASE_DIR),
+        args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=str(BASE_DIR),
     )
 
 
@@ -357,14 +482,15 @@ def _run_with_timeout(fn, timeout_sec=3, *args, **kwargs):
         executor.shutdown(wait=False)
 
 
-def get_tickers():
+def get_tickers(client=None):
     """获取所有合约 Ticker（缓存5秒）."""
     global _ticker_cache, _ticker_cache_time
+    cl = client or public_binance
     now = time.time()
     if now - _ticker_cache_time < 5 and _ticker_cache:
         return _ticker_cache
     try:
-        tickers = _run_with_timeout(public_binance.fetch_tickers, 5)
+        tickers = _run_with_timeout(cl.fetch_tickers, 5)
         if tickers:
             _ticker_cache = {k: v for k, v in tickers.items() if k.endswith("USDT") and ":USDT" in k}
             _ticker_cache_time = now
@@ -384,16 +510,17 @@ def get_klines(symbol: str, timeframe: str = "1m", limit: int = 100):
         return []
 
 
-def get_account_balance():
+def get_account_balance(username=None):
     """获取合约账户余额."""
     global _balance_cache, _balance_cache_time
     now = time.time()
     if now - _balance_cache_time < 10 and _balance_cache:
         return _balance_cache
     try:
-        if private_binance:
+        pb = _get_private_binance(username) if username else None
+        if pb:
             bal = _run_with_timeout(
-                lambda: private_binance.fetch_balance(params={"type": "swap"}), 5)
+                lambda: pb.fetch_balance(params={"type": "swap"}), 5)
             if bal:
                 _balance_cache = bal
                 _balance_cache_time = now
@@ -474,14 +601,15 @@ def get_next_funding_time():
     }
 
 
-def get_fee_info():
+def get_fee_info(username=None):
     """获取用户手续费率."""
     global _fee_info
     if _fee_info:
         return _fee_info
     try:
-        if private_binance:
-            fees = _run_with_timeout(private_binance.fetch_trading_fees, 5)
+        pbc = _get_private_binance(username) if username else None
+        if pbc:
+            fees = _run_with_timeout(pbc.fetch_trading_fees, 5)
             if fees:
                 linear = fees.get("linear", {}) if isinstance(fees, dict) else {}
                 _fee_info = {
@@ -495,11 +623,12 @@ def get_fee_info():
     return _fee_info
 
 
-def get_positions_from_exchange():
+def get_positions_from_exchange(username=None):
     """从币安获取实时持仓."""
     try:
-        if private_binance:
-            positions = _run_with_timeout(private_binance.fetch_positions, 5)
+        pbc = _get_private_binance(username) if username else None
+        if pbc:
+            positions = _run_with_timeout(pbc.fetch_positions, 5)
             return positions if positions else []
     except Exception:
         pass
@@ -604,7 +733,7 @@ async function doLogin() {
   if (result.ok) {
     localStorage.setItem('token', result.token);
     localStorage.setItem('username', result.user.username);
-    window.location.href = '/';
+    window.location.href = '/app';
   } else {
     errEl.textContent = result.error || '登录失败';
     errEl.style.display = 'block';
@@ -710,7 +839,7 @@ async function doRegister() {
   if (result.ok) {
     sucEl.textContent = '注册成功！即将跳转到登录页...';
     sucEl.style.display = 'block';
-    setTimeout(() => { window.location.href = '/'; }, 1500);
+    setTimeout(() => { window.location.href = '/app'; }, 1500);
   } else {
     errEl.textContent = result.error || '注册失败';
     errEl.style.display = 'block';
@@ -778,7 +907,7 @@ PAGE_USER_DASHBOARD = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>用户仪表盘</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/chart.js"></script>
 <style>
 :root {
   --bg: #0c0f16; --card: #111620; --border: #1c2333; --text: #9599a3;
@@ -869,13 +998,13 @@ load();
 </html>
 """
 
-HTML = r"""<!DOCTYPE html>
+HTML_USER = r"""<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>量化交易系统</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/chart.js"></script>
 <style>
 :root {
   --bg: #0c0f16; --card: #111620; --border: #1c2333; --text: #9599a3;
@@ -1020,6 +1149,8 @@ label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; mar
     <button class="hamburger" onclick="toggleSidebar()" title="菜单">☰</button>
     <h2 id="pageTitle">仪表盘</h2>
     <div class="right">
+      <span id="usernameDisplay" style="color:var(--green);margin-right:12px;font-size:12px;"></span>
+      <button onclick="doLogout()" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;margin-right:8px;">退出</button>
       <span id="liveTime">--</span>
       <span id="botStatus" class="badge off">● 离线</span>
     </div>
@@ -1028,6 +1159,10 @@ label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; mar
 </div>
 
 <script>
+// ── 登录检查 ──
+if(!localStorage.getItem('token')){
+  window.location.href='/';
+}
 const pages={dashboard:'仪表盘',strategy_op:'策略配置',monitor:'数据监控',analysis:'资产分析',logs:'系统日志',settings:'设置中心'};
 let currentPage='dashboard', chartInstances={}, refreshTimer=null;
 
@@ -1056,7 +1191,11 @@ async function navigate(page){
 async function api(path,opts={}){
   const init={};
   if(opts.method==='POST'){init.method='POST';init.headers={'Content-Type':'application/json'};init.body=opts.body;}
-  const r=await fetch('/api'+path,init);
+  const token=localStorage.getItem('token')||'';
+  let url='/api'+path;
+  if(token){url+=(url.includes('?')?'&':'?')+'token='+encodeURIComponent(token);}
+  const r=await fetch(url,init);
+  if(r.status===401){localStorage.removeItem('token');localStorage.removeItem('username');window.location.href='/';return{error:'unauthorized'};}
   return r.json();
 }
 
@@ -1079,6 +1218,21 @@ function updateClock(){
 }
 setInterval(updateClock,1000);updateClock();
 
+// ── 认证 ──
+async function doLogout(){
+  await api('/auth/logout',{method:'POST',body:'{}'});
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  window.location.href='/';
+}
+(async function(){
+  const me=await api('/auth/me');
+  if(me.user){
+    document.getElementById('usernameDisplay').textContent=me.user.username;
+    localStorage.setItem('username',me.user.username);
+  }
+})();
+
 async function updateBotStatus(){
   const d=await api('/status');
   const el=document.getElementById('botStatus');
@@ -1091,7 +1245,15 @@ async function updateBotStatus(){
 setInterval(updateBotStatus,5000);updateBotStatus();
 
 // ========== 仪表盘 ==========
-async function initDashboard(){refreshDashboard();loadHistoryPositions();}
+async function initDashboard(){
+  // 检查是否已配置币安密钥
+  const keys=await api('/apikeys');
+  if(!keys.configured){
+    document.getElementById('mainContent').innerHTML='<div class=\"card\" style=\"text-align:center;padding:60px 20px\"><h3 style=\"color:var(--orange);margin-bottom:16px\">⚙️ 请先配置币安 API 密钥</h3><p style=\"color:var(--text);margin-bottom:24px\">您还没有配置币安 API Key 和 Secret Key，<br>无法连接交易所查看行情和交易。</p><button class=\"btn btn-primary\" onclick=\"navigate(\'settings\')\">前往设置 →</button></div>';
+    return;
+  }
+  refreshDashboard();loadHistoryPositions();
+}
 
 async function refreshDashboard(){
   const d=await api('/dashboard');
@@ -1486,26 +1648,21 @@ async function saveStrategyConfig(){
     if(dupIdx>=0)strategyList[dupIdx]=cfg;
     else strategyList.push(cfg);
   }
-  showPwdModal(async()=>{
-    await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
-    resetStrategyForm();
-    renderStrategyTable();
-    // 保存后自动重启机器人应用新配置
-    try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
-    setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
-    setTimeout(initStrategyOp,4000);
-    alert('策略配置已保存，正在重启机器人...');
-  });
+  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
+  resetStrategyForm();
+  renderStrategyTable();
+  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
+  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
+  setTimeout(initStrategyOp,4000);
+  alert('策略配置已保存，正在重启机器人...');
 }
 async function deleteStrategy(idx){
   if(!confirm('删除策略 '+strategyList[idx]?.symbol+' 的配置？'))return;
   strategyList.splice(idx,1);
-  showPwdModal(async()=>{
-    await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
-    renderStrategyTable();
-    try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
-    setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
-  });
+  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
+  renderStrategyTable();
+  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
+  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
 }
 
 // ========== 数据监控 ==========
@@ -1583,6 +1740,7 @@ async function initSettings(){
   const apis=await api('/apikeys');
   const ak=document.getElementById('set_api_key');if(ak)ak.value=apis.apiKey||'';
   const sk=document.getElementById('set_secret_key');if(sk)sk.value=apis.secretKey||'';
+  const px=document.getElementById('set_proxy_url');if(px)px.value=apis.proxyUrl||'';
 }
 let pwdCallback=null;
 function showPwdModal(callback){
@@ -1607,12 +1765,11 @@ async function confirmPwd(){
   }
 }
 async function saveApiKeys(){
-  showPwdModal(async ()=>{
-    const ak=document.getElementById('set_api_key')?.value||'';
-    const sk=document.getElementById('set_secret_key')?.value||'';
-    const r=await api('/apikeys/save',{method:'POST',body:JSON.stringify({apiKey:ak,secretKey:sk})});
-    alert(r.ok?'API Key 已保存，请重启服务生效':'保存失败');
-  });
+  const ak=document.getElementById('set_api_key')?.value||'';
+  const sk=document.getElementById('set_secret_key')?.value||'';
+  const px=document.getElementById('set_proxy_url')?.value||'';
+  const r=await api('/apikeys/save',{method:'POST',body:JSON.stringify({apiKey:ak,secretKey:sk,proxyUrl:px})});
+  if(r.ok){alert('API Key 已保存，2秒后自动刷新');setTimeout(()=>location.reload(),2000);}else{alert('保存失败');}
 }
 
 (async function(){
@@ -1878,8 +2035,9 @@ PAGE_SETTINGS = """
   <h3>API 配置</h3>
   <label>API Key</label><input type="password" id="set_api_key" placeholder="币安 API Key">
   <label>Secret Key</label><input type="password" id="set_secret_key" placeholder="币安 Secret Key">
+  <label>代理 URL（VPN/Clash 端口）</label><input type="text" id="set_proxy_url" placeholder="http://127.0.0.1:7897">
   <button class="btn btn-primary" style="margin-top:12px" onclick="saveApiKeys()">保存 API 密钥</button>
-  <p style="font-size:11px;color:var(--text);margin-top:8px">密钥保存在服务器 .env 文件中，保存后需重启服务生效</p>
+  <p style="font-size:11px;color:var(--text);margin-top:8px">密钥和代理保存到您的专属配置中，保存后刷新页面生效</p>
   <p style="font-size:12px;color:var(--orange);margin-top:16px">交易策略配置请前往「策略配置」页面</p>
 </div>
 """
@@ -1913,29 +2071,105 @@ def _parse_json(body):
         return {}
 
 
+def _extract_token(qs: str = "", body: str = None) -> str:
+    """从 query string 或 POST body 中提取 token."""
+    if qs:
+        params = parse_qs(qs)
+        token = params.get("token", [""])[0]
+        if token:
+            return token
+    if body:
+        data = _parse_json(body)
+        token = data.get("token", "")
+        if token:
+            return token
+    return ""
+
+
+# 不需要认证的公开路径
+_PUBLIC_PATHS = [
+    "/api/auth/login", "/api/auth/register", "/api/status",
+    "/api/market/overview", "/api/ticker/", "/api/klines/",
+    "/api/debug/", "/api/avatar",
+]
+
+
+def _is_public_path(path: str) -> bool:
+    """检查路径是否为公开访问路径（无需登录）."""
+    for pp in _PUBLIC_PATHS:
+        if path.startswith(pp):
+            return True
+    return False
+
+
 def _handle_api(path, body=None, qs=""):
     params = parse_qs(qs) if qs else {}
+
+    # ── 认证端点（公开访问）──
+    if path == "/api/auth/login" and body:
+        data = _parse_json(body)
+        result = login_user(data.get("username", ""), data.get("password", ""))
+        return result
+
+    if path == "/api/auth/register" and body:
+        data = _parse_json(body)
+        result = register_user(data.get("username", ""), data.get("password", ""))
+        return result
+
+    if path == "/api/auth/me":
+        token = _extract_token(qs, body)
+        user = get_user_by_token(token) if token else None
+        if user:
+            return {"ok": True, "user": user}
+        return {"ok": False, "error": "未登录", "user": None}
+
+    if path == "/api/auth/logout" and body:
+        token = _extract_token(qs, body)
+        logout_user(token)
+        return {"ok": True}
+
+    if path == "/api/auth/reset-password" and body:
+        token = _extract_token(qs, body)
+        user = get_user_by_token(token) if token else None
+        if not user:
+            return {"error": "unauthorized", "code": 401}
+        data = _parse_json(body)
+        result = reset_password(user["username"], data.get("oldPassword", ""), data.get("newPassword", ""))
+        return result
+
+    # ── 认证守卫：非公开路径需要有效 token ──
+    if not _is_public_path(path):
+        token = _extract_token(qs, body)
+        user = get_user_by_token(token) if token else None
+        if not user:
+            return {"error": "unauthorized", "code": 401}
+        username = user["username"]
+        pb = _get_private_binance(username)
+    else:
+        username = None
+        pb = None
 
     # ── GET ──
 
     if path == "/api/status":
-        return {"running": is_bot_running()}
+        return {"running": is_bot_running(username) if username else is_bot_running()}
 
     if path == "/api/config":
-        return load_env()
+        return load_env(username)
 
     if path == "/api/dashboard":
 
         # ── Binance 连通性快速检查（缓存60秒）──
         global _binance_ok, _binance_check_time
         if time.time() - _binance_check_time > 60:
-            result = _run_with_timeout(lambda: public_binance.fetch_ticker('BTC/USDT'), 2)
+            checker = _get_public_binance(username) if username else public_binance
+            result = _run_with_timeout(lambda: checker.fetch_ticker('BTC/USDT'), 5)
             _binance_ok = result is not None
             _binance_check_time = time.time()
 
-        trades = load_trades()
-        local_positions = load_positions()
-        watchlist = load_watchlist()
+        trades = load_trades(username)
+        local_positions = load_positions(username)
+        watchlist = load_watchlist(username)
 
         # 如果 Binance 不可达，返回本地数据 + 离线标记
         if not _binance_ok:
@@ -1975,22 +2209,22 @@ def _handle_api(path, body=None, qs=""):
         # ── Binance 可达，并行获取数据 ──
         executor = ThreadPoolExecutor(max_workers=8)
         try:
-            f_balance = executor.submit(get_account_balance)
-            f_positions = executor.submit(get_positions_from_exchange)
+            f_balance = executor.submit(lambda: get_account_balance(username))
+            f_positions = executor.submit(lambda: get_positions_from_exchange(username))
             f_funding = executor.submit(get_funding_rates)
-            f_fee = executor.submit(get_fee_info)
-            f_tickers = executor.submit(get_tickers)
+            f_fee = executor.submit(lambda: get_fee_info(username))
+            f_tickers = executor.submit(lambda: get_tickers(_get_public_binance(username) if username else None))
             f_next_funding = executor.submit(get_next_funding_time)
 
             def _fetch_trades():
                 fills = []
-                if private_binance:
+                if pb:
                     try:
                         syms = [s.strip() for s in os.getenv("SYMBOLS", "ETHUSDT,BTCUSDT").split(",") if s.strip()]
                         extra = set()
-                        for cfg in load_strategies():
+                        for cfg in load_strategies(username):
                             extra.add(cfg.get("symbol", ""))
-                        for w in load_watchlist():
+                        for w in load_watchlist(username):
                             extra.add(w)
                         syms = list(dict.fromkeys(syms + list(extra)))
                         for raw_sym in syms:
@@ -2000,7 +2234,7 @@ def _handle_api(path, body=None, qs=""):
                                 else:
                                     csym = raw_sym
                                 result = _run_with_timeout(
-                                    lambda s=csym: private_binance.fetch_my_trades(s, limit=500), 3)
+                                    lambda s=csym: pb.fetch_my_trades(s, limit=500), 3)
                                 if result:
                                     for f_item in result:
                                         info = f_item.get("info", {}) or {}
@@ -2058,9 +2292,9 @@ def _handle_api(path, body=None, qs=""):
         if exchange_positions and local_positions:
             modified, closed_syms = sync_manual_exits(exchange_positions, local_positions, trades)
             if modified:
-                save_trades(trades)
-                save_positions(local_positions)
-                trades = load_trades()
+                save_trades(trades, username)
+                save_positions(local_positions, username)
+                trades = load_trades(username)
                 if closed_syms:
                     logging.info(f"检测到手动平仓: {closed_syms}")
 
@@ -2200,11 +2434,11 @@ def _handle_api(path, body=None, qs=""):
         days_map = {"1D": 1, "1W": 7, "1M": 30, "3M": 90, "1Y": 365}
         days = days_map.get(period, 30)
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        trades = load_trades()
+        trades = load_trades(username)
         # Get current balance
         try:
-            if private_binance:
-                bal = private_binance.fetch_balance()
+            if pb:
+                bal = pb.fetch_balance()
                 usdt = bal.get("USDT", {})
                 current_bal = float(usdt.get("total", 0) or 0)
             else:
@@ -2242,7 +2476,7 @@ def _handle_api(path, body=None, qs=""):
         return {"labels": labels[-300:], "data": data[-300:], "period": period}
 
     if path == "/api/analysis":
-        trades = load_trades()
+        trades = load_trades(username)
         # 计算真实胜率：平仓记录中有 realizedPnl > 0 的比例
         exits = [t for t in trades if t.get("realizedPnl") is not None and t.get("realizedPnl") != 0]
         win_count = sum(1 for t in exits if t.get("realizedPnl", 0) > 0)
@@ -2269,7 +2503,7 @@ def _handle_api(path, body=None, qs=""):
 
     if path.startswith("/api/logs"):
         level = params.get("level", ["ALL"])[0]
-        raw = load_logs(500)
+        raw = load_logs(500, username)
         lines = raw.strip().split("\n") if raw.strip() else []
         if level != "ALL":
             lines = [l for l in lines if level in l]
@@ -2308,26 +2542,19 @@ def _handle_api(path, body=None, qs=""):
         return result
 
     if path == "/api/apikeys":
-        return {
-            "apiKey": os.getenv("BINANCE_API_KEY", ""),
-            "secretKey": os.getenv("BINANCE_SECRET_KEY", ""),
-        }
+        if username:
+            keys = _get_user_api_keys(username)
+            keys["configured"] = bool(keys.get("apiKey") and keys.get("secretKey"))
+            return keys
+        return {"apiKey": "", "secretKey": "", "proxyUrl": "", "configured": False}
 
     if path == "/api/watchlist":
-        return {"symbols": load_watchlist()}
+        return {"symbols": load_watchlist(username)}
 
     # ── POST ──
 
     if path == "/api/bot/start" and body is not None:
-        # 同步用户配置到根目录 .env，确保 bot 能读取
-        pass  # sync removed
-        if sys.platform == "win32":
-            kill_bot_windows()
-        else:
-            subprocess.run(["pkill", "-f", "strategy_bot.py"], capture_output=True)
-        time.sleep(1)
-        subprocess.Popen([sys.executable, str(BASE_DIR / "strategy_bot.py")],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=str(BASE_DIR))
+        restart_bot(username)
         return {"ok": True}
 
     if path == "/api/bot/stop" and body is not None:
@@ -2339,21 +2566,13 @@ def _handle_api(path, body=None, qs=""):
 
     if path == "/api/config/save" and body:
         data = _parse_json(body)
-        save_env(data)
-        # 同时保存到根目录，bot 从根目录读取
-        pass  # sync removed
-        if sys.platform == "win32":
-            kill_bot_windows()
-        else:
-            subprocess.run(["pkill", "-f", "strategy_bot.py"], capture_output=True)
-        time.sleep(1)
-        subprocess.Popen([sys.executable, str(BASE_DIR / "strategy_bot.py")],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=str(BASE_DIR))
+        save_env(data, username)
+        restart_bot(username)
         return {"ok": True}
 
     if path == "/api/apikeys/save" and body:
         data = _parse_json(body)
-        user_env_file = ENV_FILE
+        user_env_file = _user_file(username, ".env") if username else ENV_FILE
         env_lines = []
         try:
             with open(user_env_file, "r", encoding="utf-8") as f:
@@ -2361,7 +2580,7 @@ def _handle_api(path, body=None, qs=""):
         except Exception:
             env_lines = []
         new_lines = []
-        found_key, found_sec = False, False
+        found_key, found_sec, found_proxy = False, False, False
         for line in env_lines:
             if line.startswith("BINANCE_API_KEY="):
                 new_lines.append(f"BINANCE_API_KEY={data.get('apiKey','')}\n")
@@ -2369,21 +2588,27 @@ def _handle_api(path, body=None, qs=""):
             elif line.startswith("BINANCE_SECRET_KEY="):
                 new_lines.append(f"BINANCE_SECRET_KEY={data.get('secretKey','')}\n")
                 found_sec = True
+            elif line.startswith("PROXY_URL="):
+                new_lines.append(f"PROXY_URL={data.get('proxyUrl','')}\n")
+                found_proxy = True
             else:
                 new_lines.append(line)
         if not found_key:
             new_lines.append(f"BINANCE_API_KEY={data.get('apiKey','')}\n")
         if not found_sec:
             new_lines.append(f"BINANCE_SECRET_KEY={data.get('secretKey','')}\n")
+        if not found_proxy:
+            new_lines.append(f"PROXY_URL={data.get('proxyUrl','')}\n")
         with open(user_env_file, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
-        # 同步 API 密钥到根目录 .env，bot 和 web_ui 都需要
-        pass  # sync removed
+        # 清除缓存，让新代理和密钥立即生效
+        _user_private_clients.pop(username, None) if username else None
+        _user_public_clients.pop(username, None) if username else None
         return {"ok": True}
 
     if path == "/api/trade/manual" and body:
         data = _parse_json(body)
-        if not private_binance:
+        if not pb:
             return {"ok": False, "error": "币安 API 未连接"}
         try:
             symbol = data.get("symbol", "ETHUSDT")
@@ -2397,20 +2622,20 @@ def _handle_api(path, body=None, qs=""):
                 sym = f"{sym[:-4]}/{sym[-4:]}:{sym[-4:]}"
 
             # 获取价格
-            ticker = private_binance.fetch_ticker(sym)
+            ticker = pb.fetch_ticker(sym)
             price = ticker.get("last", 0) or ticker.get("close", 0)
 
             usdt_val = margin * leverage
-            market = private_binance.market(sym)
+            market = pb.market(sym)
             cs = market.get("contractSize", 1.0) or 1.0
             contracts = usdt_val / (price * cs)
-            contracts = float(private_binance.amount_to_precision(sym, contracts))
+            contracts = float(pb.amount_to_precision(sym, contracts))
 
-            private_binance.set_leverage(leverage, sym)
+            pb.set_leverage(leverage, sym)
 
             order_side = "buy" if side == "LONG" else "sell"
 
-            order = private_binance.create_order(
+            order = pb.create_order(
                 symbol=sym, type="market", side=order_side,
                 amount=contracts,
             )
@@ -2423,27 +2648,27 @@ def _handle_api(path, body=None, qs=""):
         sym = data.get("symbol", "").strip().upper()
         if not sym:
             return {"ok": False, "error": "symbol required"}
-        wl = load_watchlist()
+        wl = load_watchlist(username)
         if sym not in wl:
             wl.append(sym)
-            save_watchlist(wl)
+            save_watchlist(wl, username)
         return {"ok": True}
 
     if path == "/api/watchlist/remove" and body:
         data = _parse_json(body)
         sym = data.get("symbol", "").strip().upper()
-        wl = load_watchlist()
+        wl = load_watchlist(username)
         if sym in wl:
             wl.remove(sym)
-            save_watchlist(wl)
+            save_watchlist(wl, username)
         return {"ok": True}
 
     if path == "/api/strategies":
-        return {"strategies": load_strategies(), "defaults": load_env()}
+        return {"strategies": load_strategies(username), "defaults": load_env(username)}
 
     if path == "/api/strategies/save" and body:
         data = _parse_json(body)
-        save_strategies(data.get("strategies", []))
+        save_strategies(data.get("strategies", []), username)
         return {"ok": True}
 
     if path == "/api/avatar":
@@ -2458,15 +2683,14 @@ def _handle_api(path, body=None, qs=""):
     if path == "/api/verify-password" and body:
         data = _parse_json(body)
         pwd = data.get("password", "")
-        if pwd == "@13590703676Zy":
+        admin_pwd = os.getenv("ADMIN_PASSWORD", "")
+        if admin_pwd and pwd == admin_pwd:
             return {"ok": True}
         return {"ok": False, "error": "密码错误"}
 
     # ── 策略密码管理 ──
     if path == "/api/strategy-password/status":
-        # 检查是否已设置策略密码
-        # paths removed
-        sp_file = BASE_DIR / "strategy_password.json"
+        sp_file = _user_file(username, "strategy_password.json") if username else BASE_DIR / "strategy_password.json"
         if sp_file.exists():
             return {"hasPassword": True}
         return {"hasPassword": False}
@@ -2476,8 +2700,7 @@ def _handle_api(path, body=None, qs=""):
         new_pwd = data.get("password", "")
         if not new_pwd or len(new_pwd) < 4:
             return {"ok": False, "error": "密码至少4位"}
-        # paths removed
-        sp_file = BASE_DIR / "strategy_password.json"
+        sp_file = _user_file(username, "strategy_password.json") if username else BASE_DIR / "strategy_password.json"
         with open(sp_file, "w") as f:
             json.dump({"password_hash": _hash_password(new_pwd)}, f)
         return {"ok": True}
@@ -2485,8 +2708,7 @@ def _handle_api(path, body=None, qs=""):
     if path == "/api/strategy-password/verify" and body:
         data = _parse_json(body)
         pwd = data.get("password", "")
-        # paths removed
-        sp_file = BASE_DIR / "strategy_password.json"
+        sp_file = _user_file(username, "strategy_password.json") if username else BASE_DIR / "strategy_password.json"
         if not sp_file.exists():
             return {"ok": True}  # 未设置密码，直接通过
         try:
@@ -2499,7 +2721,7 @@ def _handle_api(path, body=None, qs=""):
             return {"ok": True}  # 文件损坏，直接通过
 
     if path == "/api/debug/trades":
-        if not private_binance:
+        if not pb:
             return {"error": "无币安连接"}
         try:
             since = int((time.time() - 86400 * 7) * 1000)
@@ -2509,7 +2731,7 @@ def _handle_api(path, body=None, qs=""):
                 csym = f"{raw[:-4]}/{raw[-4:]}:{raw[-4:]}"
             else:
                 csym = raw
-            fills = private_binance.fetch_my_trades(csym, since=since, limit=5)
+            fills = pb.fetch_my_trades(csym, since=since, limit=5)
             result = []
             for t in (fills or []):
                 result.append({
@@ -2528,7 +2750,7 @@ def _handle_api(path, body=None, qs=""):
     if path == "/api/history/positions":
         # 1. 先从本地 trades.json 构建配对的入场/出场记录（策略交易权威来源）
         closed = []
-        local_trades = load_trades()
+        local_trades = load_trades(username)
         entry_map = {}  # {symbol: entry_info}
         local_time_set = set()  # {(symbol, unix_ts)} for matching
 
@@ -2594,7 +2816,7 @@ def _handle_api(path, body=None, qs=""):
                 })
 
         # 未平仓的仓位也加入历史列表（标记为持有中）
-        for sym, pos in load_positions().items():
+        for sym, pos in load_positions(username).items():
             if pos.get("contracts", 0) > 0:
                 closed.append({
                     "symbol": sym,
@@ -2612,13 +2834,13 @@ def _handle_api(path, body=None, qs=""):
                 })
 
         # 2. 从币安API补充手动交易（本地记录中没有的成交）
-        if private_binance:
+        if pb:
             try:
                 symbols = [s.strip() for s in os.getenv("SYMBOLS", "ETHUSDT,BTCUSDT").split(",") if s.strip()]
                 extra_syms = set()
-                for cfg in load_strategies():
+                for cfg in load_strategies(username):
                     extra_syms.add(cfg.get("symbol", ""))
-                for w in load_watchlist():
+                for w in load_watchlist(username):
                     extra_syms.add(w)
                 all_syms = list(dict.fromkeys(symbols + list(extra_syms)))
 
@@ -2629,7 +2851,7 @@ def _handle_api(path, body=None, qs=""):
                         else:
                             csym = raw_sym
                         fills = _run_with_timeout(
-                            lambda s=csym: private_binance.fetch_my_trades(s, limit=500), 8)
+                            lambda s=csym: pb.fetch_my_trades(s, limit=500), 8)
                         if fills:
                             for t in fills:
                                 ts = t.get("timestamp", 0) or 0
@@ -2724,15 +2946,53 @@ class UIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_file(self, filepath: Path, ct: str):
+        """发送静态文件."""
+        try:
+            data = filepath.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception:
+            self._send({"error": "not found"}, status=404)
+
     def do_GET(self):
         try:
             parsed = urlparse(self.path)
             path = parsed.path
             qs = parsed.query
 
-            # ── 首页 ──
+            # ── 静态文件 ──
+            if path == "/chart.js":
+                chart_js = BASE_DIR / "chart.js"
+                if chart_js.exists():
+                    self._send_file(chart_js, "application/javascript")
+                    return
+                self._send({"error": "not found"}, status=404)
+                return
+
+            # ── 注册页面 ──
+            if path == "/register":
+                self._send(PAGE_REGISTER, ct="text/html")
+                return
+
+            # ── 登录页/主应用 ──
             if path == "/":
-                self._send(HTML, ct="text/html")
+                token = _extract_token(qs)
+                user = get_user_by_token(token) if token else None
+                if user:
+                    self._send(HTML_USER, ct="text/html")
+                else:
+                    self._send(PAGE_LOGIN, ct="text/html")
+                return
+
+            # ── 主应用页面 ──
+            if path == "/app":
+                # JS 端用 localStorage 做鉴权，服务端无条件返回主页面
+                self._send(HTML_USER, ct="text/html")
                 return
 
             if path.startswith("/page/"):
@@ -2745,7 +3005,13 @@ class UIHandler(BaseHTTPRequestHandler):
                     result = handle_api(api_path, qs=qs)
                 except Exception as e:
                     result = {"error": str(e)}
-                status = 404 if isinstance(result, dict) and "error" in result else 200
+                code = result.get("code", 0) if isinstance(result, dict) else 0
+                if code == 401 or (isinstance(result, dict) and result.get("error") == "unauthorized"):
+                    status = 401
+                elif isinstance(result, dict) and "error" in result:
+                    status = 404
+                else:
+                    status = 200
                 self._send(result, status=status)
                 return
 
@@ -2763,13 +3029,20 @@ class UIHandler(BaseHTTPRequestHandler):
 
             parsed = urlparse(self.path)
             path = parsed.path
+            qs = parsed.query
 
             if path.startswith("/api/"):
                 try:
-                    result = handle_api(path, body=body)
+                    result = handle_api(path, body=body, qs=qs)
                 except Exception as e:
                     result = {"error": str(e)}
-                status = 404 if "error" in result else 200
+                code = result.get("code", 0) if isinstance(result, dict) else 0
+                if code == 401 or (isinstance(result, dict) and result.get("error") == "unauthorized"):
+                    status = 401
+                elif isinstance(result, dict) and "error" in result:
+                    status = 404
+                else:
+                    status = 200
                 self._send(result, status=status)
                 return
 
@@ -2785,8 +3058,13 @@ class UIHandler(BaseHTTPRequestHandler):
 
 
 def run():
+    # 初始化数据库和预置账户
+    init_preset_accounts()
+    print(f"数据库已初始化: {BASE_DIR / 'accounts.db'}")
+
     server = ThreadingHTTPServer(("0.0.0.0", PORT), UIHandler)
-    print(f"量化交易系统 v3 → http://47.76.187.153:{PORT}")
+    server_host = os.getenv("SERVER_HOST", "localhost")
+    print(f"量化交易系统 v3 → http://{server_host}:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
