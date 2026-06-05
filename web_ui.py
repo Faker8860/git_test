@@ -1519,7 +1519,443 @@ async function initDashboard(){
   }
   refreshDashboard();loadHistoryPositions();
 }
-</script>
+
+
+async function refreshDashboard(){
+  const d=await api('/dashboard');
+  // 更新连接状态
+  const bs=document.getElementById('botStatus');
+  if (d.offline) {
+    bs.className='badge off'; bs.textContent='⚠ 币安离线(需VPN)';
+  }
+  const set=(id,v,cls)=>{const el=document.getElementById(id);if(el){el.textContent=v;if(cls)el.className=cls;}};
+  set('dashBalance',(d.balance||0).toFixed(2)+' USDT');
+  set('dashPnl',(d.unrealizedPnl||0).toFixed(2)+' USDT','value '+(d.unrealizedPnl>=0?'green':'red'));
+  set('dashTodayPnl',(d.todayPnl||0).toFixed(2)+' USDT','value '+(d.todayPnl>=0?'green':'red'));
+  set('dashPosCount',d.positionCount||0);
+  set('dashTradeCount',d.todayTrades||0);
+
+  // 下次资金费率结算倒计时
+  if(d.nextFunding){
+    const cd=document.getElementById('dashFundingCD');
+    if(cd){
+      const secs=d.nextFunding.seconds_left||0;
+      const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60), s=secs%60;
+      cd.textContent=h+'时'+m+'分'+s+'秒';
+      cd.style.color=secs<1800?'var(--orange)':'var(--title)';
+    }
+    setText('dashFeeRate',(d.feeInfo?.takerPct||0.04).toFixed(3)+'% taker');
+    setText('dashFeeRateVal',(d.feeInfo?.takerPct||0.04).toFixed(3)+'%');
+  }
+
+  // 当前持仓表格
+  const ct=document.getElementById('currentPositions');
+  if(ct && d.positions){
+    if(d.positions.length===0){
+      ct.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--text)">暂无持仓</td></tr>';
+    }else{
+      ct.innerHTML=d.positions.map(p=>{
+        const side=p.side==='LONG'?'多头':'空头';
+        const sideColor=p.side==='LONG'?'var(--green)':'var(--red)';
+        const pnl=(p.unrealizedPnl||0);
+        const pnlColor=pnl>=0?'var(--green)':'var(--red)';
+        const fr=(p.fundingRate||0);
+        const frColor=fr>0?'var(--green)':(fr<0?'var(--red)':'var(--text)');
+        return `<tr>
+          <td>${(p.symbol||'').replace(':USDT','')}</td>
+          <td style="color:${sideColor};font-weight:bold">${side}</td>
+          <td>${(p.entryPrice||0).toFixed(4)}</td>
+          <td>${(p.markPrice||0).toFixed(4)}</td>
+          <td style="color:var(--red)">${(p.liquidationPrice||0).toFixed(4)}</td>
+          <td>${p.leverage||0}x</td>
+          <td>${p.marginMode||'--'}</td>
+          <td>${p.contracts||0}</td>
+          <td style="color:${frColor};font-size:11px" title="${p.fundingLabel||''}">${fr>=0?'+':''}${fr.toFixed(4)}%</td>
+          <td style="font-size:11px">${(p.openFee||0).toFixed(4)}+${(p.closeFee||0).toFixed(4)}=<b>${(p.totalFee||0).toFixed(4)}U</b></td>
+          <td style="color:${pnlColor};font-weight:bold">${pnl>=0?'+':''}${pnl.toFixed(2)}U</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  // 自选币种
+  const wg=document.getElementById('watchGrid');
+  if(wg && d.watchlist){
+    wg.innerHTML=d.watchlist.map(w=>{
+      const ch=w.change||0;
+      const cc=ch>=0?'green':'red';
+      return `<div class="watch-card">
+        <span class="remove" onclick="removeWatch('${w.symbol}')" title="移除">×</span>
+        <div class="pair">${(w.symbol||'').replace(':USDT','')}</div>
+        <div class="price">${(w.price||0).toFixed(w.symbol?.startsWith('BTC')?2:4)}</div>
+        <div class="change ${cc}">${ch>=0?'+':''}${ch.toFixed(2)}%</div>
+      </div>`;
+    }).join('');
+  }
+
+  // 收益图 - 支持时间周期切换
+  async function loadEquity(period,btn){
+    document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
+    if(btn)btn.classList.add('active');
+    try{
+      const resp=await fetch('/api/equity?period='+period);
+      const d=await resp.json();
+      if(!d.labels||!d.labels.length)return;
+      const ctx=document.getElementById('profitChart')?.getContext('2d');
+      if(!ctx)return;
+      if(chartInstances.profit)chartInstances.profit.destroy();
+      const isUp=d.data[d.data.length-1]>=d.data[0];
+      chartInstances.profit=new Chart(ctx,{
+        type:'line',
+        data:{
+          labels:d.labels,
+          datasets:[{label:'权益曲线',data:d.data,borderColor:isUp?'#22c55e':'#ef4444',backgroundColor:isUp?'rgba(34,197,94,.08)':'rgba(239,68,68,.08)',fill:true,tension:.3,pointRadius:0}]
+        },
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          interaction:{intersect:false,mode:'index'},
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toFixed(2)}}},
+          scales:{x:{ticks:{color:'#555',font:{size:9},maxTicksLimit:12},grid:{color:'#1c2333'}},y:{ticks:{color:'#555',font:{size:9},callback:v=>'$'+v.toFixed(0)},grid:{color:'#1c2333'}}}
+        }
+      });
+    }catch(e){}
+  }
+
+  // 收益图（首次加载）
+  if(!chartInstances.profit)loadEquity('1D');
+
+  // 最近交易
+  const rt=document.getElementById('recentTrades');
+  if(rt && d.recentTrades){
+    const names={'long_entry':'做多','exit_long':'平多','short_entry':'做空','exit_short':'平空',
+      'flip_close_long':'翻转平多','flip_close_short':'翻转平空','exit_manual':'手动平仓',
+      '买入':'买入','卖出':'卖出','手动买入':'手动买入','手动卖出':'手动卖出'};
+    rt.innerHTML=d.recentTrades.map(t=>`<tr>
+      <td>${t.time||''}</td><td>${t.symbol||''}</td><td>${names[t.action]||t.action||'--'}</td>
+      <td>${t.contracts||''}</td><td>${t.price||''}</td><td>${t.usdt_value||''}U</td></tr>`).join('');
+  }
+}
+
+async function loadHistoryPositions(){
+  const d=await api('/history/positions');
+  setText('dashTotalRealPnl',(d.totalPnl||0).toFixed(2)+' USDT');
+  const el=document.getElementById('dashTotalRealPnl');
+  if(el)el.className='value '+(d.totalPnl>=0?'green':'red');
+  setText('histTotal',d.totalClosed||0);
+  setText('histTotalPnl',(d.totalPnl||0).toFixed(2));
+  setText('histWinRate',(d.winRate||0).toFixed(1)+'%');
+  const ht=document.getElementById('historyPositions');
+  if(ht && d.positions){
+    if(d.positions.length===0){
+      ht.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text)">暂无交易记录</td></tr>';
+    }else{
+      ht.innerHTML=d.positions.map(p=>{
+        const pnl=p.realizedPnl||0;
+        const pnlColor=pnl>=0?'var(--green)':'var(--red)';
+        const actionColor=p.action?.includes('平')||p.action?.includes('卖')?'var(--orange)':(p.action?.includes('买')?'var(--green)':'var(--text)');
+        const isManual=p.isManual?' (手动)':'';
+        return `<tr>
+          <td>${p.entryTime||p.exitTime||''}</td>
+          <td>${(p.symbol||'').replace(':USDT','')}</td>
+          <td style="color:${actionColor}">${p.action||(p.side==='LONG'?'多头':'空头')}${isManual}</td>
+          <td>${(p.price||p.entryPrice||0).toFixed(4)}</td>
+          <td>${p.contracts||0}</td>
+          <td>${(p.usdtValue||0).toFixed(2)}U</td>
+          <td style="color:${pnlColor};font-weight:bold">${pnl>0?'+':''}${pnl.toFixed(2)}U</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+}
+
+async function initMonitor(){await refreshMonitor();document.getElementById('monSymbol')?.addEventListener('change',refreshMonitor);}
+
+async function refreshMonitor(){
+  const symbol=document.getElementById('monSymbol')?.value||'ETHUSDT';
+  const d=await api('/klines/'+symbol+'?limit=200');
+  const ctx=document.getElementById('klineChart')?.getContext('2d');
+  if(!ctx||!d.klines)return;
+  if(chartInstances.kline)chartInstances.kline.destroy();
+  const labels=d.klines.map(k=>new Date(k[0]).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
+  const closes=d.klines.map(k=>k[4]);
+  chartInstances.kline=new Chart(ctx,{
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {label:'价格',data:closes,borderColor:'#3b82f6',pointRadius:0,tension:.1,borderWidth:1.5},
+        {label:'MA5',data:d.ma5,borderColor:'#f59e0b',pointRadius:0,borderWidth:1,spanGaps:true},
+        {label:'MA10',data:d.ma10,borderColor:'#ef4444',pointRadius:0,borderWidth:1,spanGaps:true},
+        {label:'MA20',data:d.ma20,borderColor:'#8b5cf6',pointRadius:0,borderWidth:1,spanGaps:true},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#9599a3',font:{size:10}}}},
+      scales:{x:{ticks:{color:'#555',font:{size:9}},grid:{color:'#1c2333'}},y:{ticks:{color:'#555',font:{size:9}},grid:{color:'#1c2333'}}}
+    }
+  });
+  const last=closes[closes.length-1]||0;
+  setText('monPrice',last.toFixed(2));
+  setText('monVolume',(d.klines[d.klines.length-1]?.[5]||0).toFixed(1));
+
+  // 行情表
+  const mkts=await api('/market/overview');
+  const tb=document.getElementById('marketTable');
+  if(tb){
+    tb.innerHTML=mkts.slice(0,30).map((m,i)=>`<tr><td>${i+1}</td><td>${(m.symbol||'').replace(':USDT','')}</td><td>${(m.price||0).toFixed(4)}</td><td class="${(m.change||0)>=0?'green':'red'}">${(m.change||0)>=0?'+':''}${(m.change||0).toFixed(2)}%</td></tr>`).join('');
+  }
+}
+
+async function initAnalysis(){
+  const d=await api('/analysis');
+  setText('anaWinRate',(d.winRate||0).toFixed(1)+'%');
+  setText('anaPnLRatio',d.pnlRatio||'--');
+  setText('anaTotalTrades',d.totalTrades||0);
+  setText('anaBestTrade',(d.bestTrade||0).toFixed(2)+'U');
+  const ctx1=document.getElementById('winRateChart')?.getContext('2d');
+  if(ctx1){
+    chartInstances.winRate=new Chart(ctx1,{type:'doughnut',data:{labels:['盈利','亏损'],datasets:[{data:[d.winRate||0,100-(d.winRate||0)],backgroundColor:['#22c55e','#ef4444']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#9599a3',font:{size:10}}}}}});
+  }
+  const ctx2=document.getElementById('pairChart')?.getContext('2d');
+  if(ctx2&&d.pairStats){
+    chartInstances.pair=new Chart(ctx2,{type:'bar',data:{labels:d.pairStats.map(p=>p.name),datasets:[{data:d.pairStats.map(p=>p.count),backgroundColor:'#3b82f6',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#555'},grid:{color:'#1c2333'}},y:{ticks:{color:'#555'},grid:{display:false}}}}});
+  }
+}
+
+async function initLogs(){await loadLogLines();document.getElementById('logLevel')?.addEventListener('change',loadLogLines);}
+
+async function initSettings(){
+  const apis=await api('/apikeys');
+  const ak=document.getElementById('set_api_key');if(ak)ak.value=apis.apiKey||'';
+  const sk=document.getElementById('set_secret_key');if(sk)sk.value=apis.secretKey||'';
+  const px=document.getElementById('set_proxy_url');if(px)px.value=apis.proxyUrl||'';
+}
+let pwdCallback=null;
+
+async function saveApiKeys(){
+  const ak=document.getElementById('set_api_key')?.value||'';
+  const sk=document.getElementById('set_secret_key')?.value||'';
+  const px=document.getElementById('set_proxy_url')?.value||'';
+  const r=await api('/apikeys/save',{method:'POST',body:JSON.stringify({apiKey:ak,secretKey:sk,proxyUrl:px})});
+  if(r.ok){alert('API Key 已保存，2秒后自动刷新');setTimeout(()=>location.reload(),2000);}else{alert('保存失败');}
+}
+
+(async function(){
+  const a=await api('/avatar');
+  if(a.data){document.getElementById('avatarImg').src=a.data;}
+})();
+loadPage('dashboard');
+
+async function toggleBot(start){
+  await api(start?'/bot/start':'/bot/stop',{method:'POST',body:'{}'});
+  setTimeout(initStrategy,1500);
+}
+
+async function initStrategyOp(){
+  // ── 策略密码验证 ──
+  const pwdCheck = await api('/strategy-password/status');
+  if (pwdCheck.hasPassword) {
+    const pwd = prompt('此策略页面已设置密码保护，请输入策略密码：');
+    if (!pwd) {
+      navigate('dashboard');
+      alert('已取消，返回仪表盘');
+      return;
+    }
+    const verify = await api('/strategy-password/verify', {
+      method: 'POST',
+      body: JSON.stringify({password: pwd})
+    });
+    if (!verify.ok) {
+      alert('策略密码错误！');
+      navigate('dashboard');
+      return;
+    }
+  }
+  // 加载策略状态
+  const d=await api('/status');
+  const cfg=await api('/config');
+  setText('stratStatus',d.running?'运行中':'已停止');
+  const sel=document.getElementById('stratStatus');
+  if(sel){sel.className='badge '+(d.running?'on':'off');}
+  setText('stratBtn',d.running?'停止策略':'启动策略');
+  const btn=document.getElementById('stratBtn');
+  if(btn)btn.onclick=()=>toggleBot(!d.running);
+  const actDelay=parseInt(cfg.ACTIVATION_DELAY_MINUTES||'0');
+  setText('stratActDelay',actDelay>0?actDelay+' 分钟':'立即启动');
+  const stype=cfg.STRATEGY_TYPE||'TEMA';
+  if(stype==='VOLTY'){
+    setText('stratName','Volty Expan Close Strategy');
+    setText('stratTypeLabel','波动性突破（ATR通道）');
+    setText('stratLogic','ATR通道突破，Bar收盘确认，每根K线更新入场价');
+  }else{
+    setText('stratName','OCC Strategy v8.13');
+    setText('stratTypeLabel','趋势跟随（TEMA 跨周期）');
+    setText('stratLogic','跨周期均线交叉 + 延迟确认');
+  }
+  const fields={stratSymbols:cfg.SYMBOLS,stratTF:cfg.TIMEFRAME_MINUTES+'分钟',stratMA:cfg.MA_TYPE+'('+cfg.MA_LEN+')',stratCross:cfg.CROSS_MULT+'x',stratDelay:cfg.DELAY_MINUTES+'分钟',stratPct:cfg.POSITION_PCT+'%',stratLev:cfg.LEVERAGE+'x',stratSL:cfg.STOP_LOSS_PCT+'%',stratType:cfg.TRADE_TYPE,stratVoltyLen:cfg.VOLTY_LENGTH||'5',stratVoltyMult:(cfg.VOLTY_ATR_MULT||'0.75')+'x'};
+  for(const[id,val]of Object.entries(fields))setText(id,val);
+  const showTema=stype!=='VOLTY';
+  const showVolty=stype==='VOLTY';
+  document.getElementById('stratRowMA').style.display=showTema?'':'none';
+  document.getElementById('stratRowCross').style.display=showTema?'':'none';
+  document.getElementById('stratRowVoltyLen').style.display=showVolty?'':'none';
+  document.getElementById('stratRowVoltyMult').style.display=showVolty?'':'none';
+  // 加载策略配置列表
+  loadStrategyList();
+}
+
+async function saveStrategyConfig(){
+  const idx=document.getElementById('cfgEditId').value;
+  const cfg={
+    symbol:document.getElementById('cfgSymbol').value,
+    strategyType:document.getElementById('cfgStrategyType').value,
+    timeframe:parseInt(document.getElementById('cfgTimeframe').value)||1,
+    maType:document.getElementById('cfgMAType').value,
+    maLen:parseInt(document.getElementById('cfgMALen').value)||8,
+    crossMult:parseInt(document.getElementById('cfgCrossMult').value)||3,
+    delayMin:parseInt(document.getElementById('cfgDelayMin').value)||5,
+    voltyLength:parseInt(document.getElementById('cfgVoltyLength').value)||5,
+    voltyAtrMult:parseFloat(document.getElementById('cfgVoltyAtrMult').value)||0.75,
+    positionPct:parseInt(document.getElementById('cfgPositionPct').value)||20,
+    leverage:parseInt(document.getElementById('cfgLeverage').value)||3,
+    marginMode:document.getElementById('cfgMarginMode').value,
+    stopLoss:parseFloat(document.getElementById('cfgStopLoss').value)||5,
+    tradeType:document.getElementById('cfgTradeType').value,
+    actDelay:parseInt(document.getElementById('cfgActDelay').value)||0,
+    maxOrder:parseFloat(document.getElementById('cfgMaxOrder').value)||0,
+    minOrder:parseFloat(document.getElementById('cfgMinOrder').value)||11,
+  };
+  if(idx!==''){
+    strategyList[parseInt(idx)]=cfg;
+  }else{
+    // 检查重复
+    const dupIdx=strategyList.findIndex(s=>s.symbol===cfg.symbol);
+    if(dupIdx>=0)strategyList[dupIdx]=cfg;
+    else strategyList.push(cfg);
+  }
+  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
+  resetStrategyForm();
+  renderStrategyTable();
+  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
+  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
+  setTimeout(initStrategyOp,4000);
+  alert('策略配置已保存，正在重启机器人...');
+}
+
+async function deleteStrategy(idx){
+  if(!confirm('删除策略 '+strategyList[idx]?.symbol+' 的配置？'))return;
+  strategyList.splice(idx,1);
+  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
+  renderStrategyTable();
+  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
+  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
+}
+
+function resetStrategyForm(){
+  document.getElementById('cfgEditId').value='';
+  document.getElementById('cfgSymbol').value='ETHUSDT';
+  document.getElementById('cfgStrategyType').value='TEMA';
+  document.getElementById('cfgTimeframe').value='1';
+  document.getElementById('cfgMAType').value='TEMA';
+  document.getElementById('cfgMALen').value='8';
+  document.getElementById('cfgCrossMult').value='3';
+  document.getElementById('cfgDelayMin').value='5';
+  document.getElementById('cfgVoltyLength').value='5';
+  document.getElementById('cfgVoltyAtrMult').value='0.75';
+  document.getElementById('cfgPositionPct').value='20';
+  document.getElementById('cfgLeverage').value='3';
+  document.getElementById('cfgLevLabel').textContent='3x';
+  document.getElementById('cfgStopLoss').value='5';
+  document.getElementById('cfgTradeType').value='BOTH';
+  document.getElementById('cfgActDelay').value='0';
+  document.getElementById('cfgMaxOrder').value='0';
+  document.getElementById('cfgMinOrder').value='11';
+  toggleCfgStrategyFields();
+}
+
+function renderStrategyTable(){
+  const tb=document.getElementById('strategyTableBody');
+  if(!tb)return;
+  if(strategyList.length===0){
+    tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text)">暂无策略配置，请添加</td></tr>';
+  }else{
+    tb.innerHTML=strategyList.map((s,i)=>{
+      const stype=s.strategyType||'TEMA';
+      const stypeLabel=stype==='VOLTY'?'Volty':'TEMA';
+      const params=stype==='VOLTY'?`ATR${s.voltyLength||5}x${s.voltyAtrMult||0.75}`:`${s.maType||'TEMA'}(${s.maLen||8}) ${s.crossMult||3}x`;
+      return `<tr>
+      <td style="color:var(--title);font-weight:bold">${s.symbol||''}</td>
+      <td><span class="tag ${stype==='VOLTY'?'tag-warn':'tag-info'}">${stypeLabel}</span></td>
+      <td>${s.timeframe||1}分钟</td>
+      <td>${params}</td>
+      <td>${s.positionPct||20}%</td>
+      <td>${s.leverage||3}x</td>
+      <td>${s.marginMode==='cross'?'全仓':'逐仓'}</td>
+      <td>${s.maxOrder>0?s.maxOrder+'U':'默认'}</td>
+      <td>${s.stopLoss||5}%</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="editStrategy(${i})">编辑</button>
+        <button class="btn btn-red btn-sm" style="margin-left:4px" onclick="deleteStrategy(${i})">✕</button>
+      </td>
+    </tr>`}).join('');
+  }
+}
+
+function editStrategy(idx){
+  const s=strategyList[idx];
+  if(!s)return;
+  document.getElementById('cfgEditId').value=idx;
+  document.getElementById('cfgSymbol').value=s.symbol||'ETHUSDT';
+  document.getElementById('cfgStrategyType').value=s.strategyType||'TEMA';
+  document.getElementById('cfgTimeframe').value=s.timeframe||'1';
+  document.getElementById('cfgMAType').value=s.maType||'TEMA';
+  document.getElementById('cfgMALen').value=s.maLen||'8';
+  document.getElementById('cfgCrossMult').value=s.crossMult||'3';
+  document.getElementById('cfgDelayMin').value=s.delayMin||'5';
+  document.getElementById('cfgVoltyLength').value=s.voltyLength||'5';
+  document.getElementById('cfgVoltyAtrMult').value=s.voltyAtrMult||'0.75';
+  document.getElementById('cfgPositionPct').value=s.positionPct||'20';
+  document.getElementById('cfgLeverage').value=s.leverage||'3';
+  document.getElementById('cfgLevLabel').textContent=(s.leverage||'3')+'x';
+  document.getElementById('cfgMarginMode').value=s.marginMode||'isolated';
+  document.getElementById('cfgStopLoss').value=s.stopLoss||'5';
+  document.getElementById('cfgTradeType').value=s.tradeType||'BOTH';
+  document.getElementById('cfgActDelay').value=s.actDelay||'0';
+  document.getElementById('cfgMaxOrder').value=s.maxOrder||'0';
+  document.getElementById('cfgMinOrder').value=s.minOrder||'11';
+  toggleCfgStrategyFields();
+}
+
+function cancelPwd(){
+  document.getElementById('pwdModal').classList.remove('show');
+  pwdCallback=null;
+}
+
+async function confirmPwd(){
+  const pwd=document.getElementById('pwdInput').value;
+  const r=await api('/verify-password',{method:'POST',body:JSON.stringify({password:pwd})});
+  if(r.ok){
+    document.getElementById('pwdModal').classList.remove('show');
+    if(pwdCallback){pwdCallback();pwdCallback=null;}
+  }else{
+    document.getElementById('pwdError').style.display='block';
+  }
+}
+
+async function addWatch(){
+  const inp=document.getElementById('watchInput');
+  const sym=(inp.value||'').toUpperCase().trim();
+  if(!sym){alert('输入币种');return;}
+  await api('/watchlist/add',{method:'POST',body:JSON.stringify({symbol:sym})});
+  inp.value='';
+  refreshDashboard();
+}
+
+async function removeWatch(sym){
+  await api('/watchlist/remove',{method:'POST',body:JSON.stringify({symbol:sym})});
+  refreshDashboard();
+}</script>
 """
 PAGE_MONITOR = """
 <div class="stat-cards">
