@@ -1201,7 +1201,7 @@ if(!localStorage.getItem('token')){
 const pages={dashboard:'仪表盘',strategy_op:'策略配置',monitor:'数据监控',analysis:'资产分析',logs:'系统日志',settings:'设置中心'};
 let currentPage='dashboard', chartInstances={}, refreshTimer=null;
 
-document.querySelectorAll('.sidebar a').forEach(a=>{
+document.querySelectorAll('.topnav a[data-page]').forEach(a=>{
   a.addEventListener('click',e=>{e.preventDefault();navigate(a.dataset.page);});
 });
 
