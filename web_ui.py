@@ -1093,6 +1093,8 @@ label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; mar
 ::-webkit-scrollbar-track { background:var(--bg); }
 ::-webkit-scrollbar-thumb { background:#2a3040; border-radius:3px; }
 .watch-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:16px; }
+.watch-row { display:flex; gap:8px; margin-bottom:10px; overflow-x:auto; padding-bottom:4px; }
+.watch-row .watch-card { min-width:170px; flex-shrink:0; }
 .watch-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
 .watch-card .pair { font-size:13px; color:var(--title); font-weight:bold; }
 .watch-card .price { font-size:18px; color:var(--title); font-weight:bold; margin:4px 0; }
@@ -1896,56 +1898,43 @@ loadProfileUI();
 # ============================================================
 
 PAGE_DASHBOARD = """
-<div class="card" style="margin-bottom:12px">
-  <h3>自选币种</h3>
-  <div class="inline-input" style="margin-bottom:8px">
-    <input id="watchInput" placeholder="添加币种（如 SOLUSDT）" style="width:200px">
-    <button class="btn btn-primary btn-sm" onclick="addWatch()">添加</button>
-  </div>
-  <div class="watch-grid" id="watchGrid">加载中...</div>
-</div>
-<div class="stat-cards">
-  <div class="stat-card"><div class="label">合约账户余额</div><div class="value" id="dashBalance">--</div></div>
-  <div class="stat-card"><div class="label">持仓盈亏</div><div class="value" id="dashPnl">--</div></div>
-  <div class="stat-card"><div class="label">今日盈亏</div><div class="value" id="dashTodayPnl">--</div></div>
-  <div class="stat-card"><div class="label">当前持仓</div><div class="value" id="dashPosCount">--</div></div>
-  <div class="stat-card"><div class="label">累计已实现盈亏</div><div class="value" id="dashTotalRealPnl">--</div></div>
-  <div class="stat-card"><div class="label">下次资金费结算</div><div class="value" id="dashFundingCD" style="font-size:16px">--</div></div>
-  <div class="stat-card"><div class="label">今日交易</div><div class="value" id="dashTradeCount">--</div></div>
-  <div class="stat-card"><div class="label">Taker手续费率</div><div class="value" id="dashFeeRateVal" style="font-size:15px">--</div></div>
+<div class="watch-row" id="watchGrid">加载中...</div>
+<div style="display:flex;gap:6px;margin-bottom:14px;">
+  <input id="watchInput" placeholder="添加币种 SOLUSDT" style="width:160px;height:32px;font-size:11px;">
+  <button class="btn btn-primary btn-sm" onclick="addWatch()">+添加</button>
 </div>
 
-<div class="card">
-  <div class="tab-nav">
+<div class="stat-cards">
+  <div class="stat-card"><div class="label">合约余额</div><div class="value" id="dashBalance">--</div><div class="sub">USDT</div></div>
+  <div class="stat-card"><div class="label">持仓盈亏</div><div class="value" id="dashPnl">--</div><div class="sub">USDT</div></div>
+  <div class="stat-card"><div class="label">今日盈亏</div><div class="value" id="dashTodayPnl">--</div><div class="sub">USDT</div></div>
+  <div class="stat-card"><div class="label">当前持仓</div><div class="value" id="dashPosCount">--</div><div class="sub">个</div></div>
+  <div class="stat-card"><div class="label">资金费率结算</div><div class="value" id="dashFundingCD" style="font-size:15px;">--</div><div class="sub">倒计时</div></div>
+  <div class="stat-card"><div class="label">Taker费率</div><div class="value" id="dashFeeRateVal">--</div><div class="sub">%</div></div>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+  <div class="tab-nav" style="margin-bottom:0;">
     <button class="active" onclick="switchPosTab('current',this)">当前持仓</button>
     <button onclick="switchPosTab('history',this)">历史仓位</button>
   </div>
   <div class="tab-content active" id="tabCurrent">
-    <div style="max-height:300px;overflow-y:auto" class="table-wrap">
-    <table><thead><tr><th>币种</th><th>方向</th><th>入场价</th><th>标记价</th><th>强平价</th><th>杠杆</th><th>模式</th><th>张数</th><th>资金费率</th><th>手续费(开+平)</th><th>未实现盈亏</th></tr></thead>
-    <tbody id="currentPositions"><tr><td colspan="11" style="text-align:center;color:var(--text)">加载中...</td></tr></tbody></table>
-    </div>
+    <div class="table-wrap"><table><thead><tr><th>币种</th><th>方向</th><th>入场价</th><th>标记价</th><th>强平价</th><th>杠杆</th><th>张数</th><th>资金费率</th><th>手续费</th><th>未实现盈亏</th></tr></thead>
+    <tbody id="currentPositions"><tr><td colspan="10" style="text-align:center;color:var(--text)">加载中...</td></tr></tbody></table></div>
   </div>
   <div class="tab-content" id="tabHistory">
-    <div style="max-height:300px;overflow-y:auto" class="table-wrap">
-    <table><thead><tr><th>时间</th><th>币种</th><th>操作</th><th>价格</th><th>张数</th><th>金额</th><th>已实现盈亏</th></tr></thead>
-    <tbody id="historyPositions"><tr><td colspan="7" style="text-align:center;color:var(--text)">加载中...</td></tr></tbody></table>
-    </div>
-    <div style="margin-top:8px;font-size:12px;display:flex;gap:16px">
-      <span>总计已平仓：<b id="histTotal" style="color:var(--title)">--</b> 笔</span>
-      <span>累计收益：<b id="histTotalPnl" style="color:var(--title)">--</b> USDT</span>
-      <span>胜率：<b id="histWinRate" style="color:var(--title)">--</b></span>
+    <div class="table-wrap"><table><thead><tr><th>时间</th><th>币种</th><th>操作</th><th>价格</th><th>张数</th><th>金额</th><th>已实现盈亏</th></tr></thead>
+    <tbody id="historyPositions"><tr><td colspan="7" style="text-align:center;color:var(--text)">加载中...</td></tr></tbody></table></div>
+    <div style="margin-top:8px;font-size:11px;display:flex;gap:20px;">
+      <span>平仓：<b id="histTotal">--</b> 笔</span><span>收益：<b id="histTotalPnl">--</b> USDT</span><span>胜率：<b id="histWinRate">--</b></span>
     </div>
   </div>
 </div>
 
 <div class="grid2">
-  <div class="card"><h3>收益走势 <span style="font-size:12px;font-weight:400;margin-left:8px">|</span> <button class="period-btn active" onclick="loadEquity('1D',this)">1天</button><button class="period-btn" onclick="loadEquity('1W',this)">1周</button><button class="period-btn" onclick="loadEquity('1M',this)">1月</button><button class="period-btn" onclick="loadEquity('3M',this)">3月</button><button class="period-btn" onclick="loadEquity('1Y',this)">1年</button></h3><div class="chart-wrap" style="height:320px"><canvas id="profitChart"></canvas></div></div>
-  <div class="card"><h3>最新交易</h3><div style="max-height:280px;overflow-y:auto">
-    <table><thead><tr><th>时间</th><th>币种</th><th>操作</th><th>张数</th><th>价格</th><th>金额</th></tr></thead><tbody id="recentTrades"></tbody></table>
-  </div></div>
-</div>
-"""
+  <div class="card"><h3>收益走势 | <button class="period-btn active" onclick="loadEquity('1D',this)">1天</button><button class="period-btn" onclick="loadEquity('1W',this)">1周</button><button class="period-btn" onclick="loadEquity('1M',this)">1月</button><button class="period-btn" onclick="loadEquity('3M',this)">3月</button><button class="period-btn" onclick="loadEquity('1Y',this)">1年</button></h3><div class="chart-wrap"><canvas id="profitChart"></canvas></div></div>
+  <div class="card"><h3>最新交易</h3><div style="max-height:280px;overflow-y:auto" class="table-wrap"><table><thead><tr><th>时间</th><th>币种</th><th>操作</th><th>张数</th><th>价格</th><th>金额</th></tr></thead><tbody id="recentTrades"></tbody></table></div></div>
+</div>"""
 
 PAGE_STRATEGY_OP = """
 <div class="grid2">
