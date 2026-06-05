@@ -498,17 +498,19 @@ def _run_with_timeout(fn, timeout_sec=3, *args, **kwargs):
         executor.shutdown(wait=False)
 
 
-def get_tickers(client=None):
-    """获取所有合约 Ticker（缓存5秒）."""
+def get_tickers(client=None, symbols=None):
+    """获取合约 Ticker（缓存15秒）."""
     global _ticker_cache, _ticker_cache_time
     cl = client or public_binance
     now = time.time()
-    if now - _ticker_cache_time < 5 and _ticker_cache:
+    if now - _ticker_cache_time < 15 and _ticker_cache:
         return _ticker_cache
     try:
-        tickers = _run_with_timeout(cl.fetch_tickers, 5)
+        # 只请求需要的币种，不查全部3594个
+        syms = symbols or ["ETH/USDT:USDT", "BTC/USDT:USDT"]
+        tickers = _run_with_timeout(lambda: cl.fetch_tickers(syms), 5)
         if tickers:
-            _ticker_cache = {k: v for k, v in tickers.items() if k.endswith("USDT") and ":USDT" in k}
+            _ticker_cache = {k: v for k, v in tickers.items()}
             _ticker_cache_time = now
     except Exception:
         pass
@@ -1028,15 +1030,18 @@ HTML_USER = r"""<!DOCTYPE html>
   --red: #ff4466; --orange: #ff9500; --sidebar: #080808; --hover: rgba(0,255,65,0.05);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; overflow:hidden; }
-.sidebar { width:200px; min-width:200px; background:var(--sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:16px 0; }
-.sidebar .logo { padding:0 20px 20px; font-size:16px; font-weight:bold; color:var(--title); border-bottom:1px solid var(--border); margin-bottom:8px; }
-.sidebar .logo span { font-size:11px; color:var(--green); display:block; margin-top:2px; }
-.sidebar a { display:flex; align-items:center; gap:8px; padding:10px 20px; color:var(--text); text-decoration:none; font-size:13px; transition:all .2s; border-left:2px solid transparent; }
-.sidebar a:hover, .sidebar a.active { background:var(--hover); color:var(--title); border-left-color:var(--accent); }
-.sidebar a .icon { width:18px; text-align:center; font-size:15px; }
+body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+/* Top Nav */
+.topnav { display:flex; align-items:center; padding:0 20px; height:46px; background:var(--sidebar); border-bottom:1px solid var(--border); flex-shrink:0; z-index:100; }
+.topnav .logo { font-size:14px; font-weight:bold; color:var(--accent); margin-right:20px; white-space:nowrap; }
+.topnav a { color:var(--text); text-decoration:none; font-size:12px; padding:0 14px; height:46px; display:flex; align-items:center; border-bottom:2px solid transparent; transition:all .2s; }
+.topnav a:hover, .topnav a.active { color:var(--accent); border-bottom-color:var(--accent); }
+.topnav .spacer { flex:1; }
+.topnav .user-dropdown a { display:block; padding:8px 16px; font-size:11px; color:var(--text); text-decoration:none; height:auto; border:none; }
+.topnav .user-dropdown a:hover { background:rgba(0,255,65,0.08); color:var(--accent); border:none; }
+/* Main area */
 .main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-.header { padding:12px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; background:var(--card); }
+.header { padding:10px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; background:var(--card); flex-shrink:0; }
 .header h2 { font-size:15px; color:var(--title); }
 .header .right { display:flex; align-items:center; gap:12px; font-size:12px; }
 .badge { padding:3px 8px; border-radius:10px; font-size:11px; }
@@ -1108,13 +1113,10 @@ label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; mar
 .tab-content.active { display:block; }
 .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
 .table-wrap table { min-width:600px; }
-.hamburger { display:none; background:none; border:none; color:var(--title); font-size:22px; cursor:pointer; padding:4px; }
-.sidebar-overlay { display:none; }
 /* 手机适配 */
 @media(max-width:768px){
-  body { flex-direction:column; }
-  .sidebar { position:fixed; left:-220px; top:0; height:100%; z-index:1001; transition:left .3s; width:200px; }
-  .sidebar.open { left:0; box-shadow:4px 0 20px rgba(0,0,0,.8); }
+  .topnav a { padding:0 6px; font-size:10px; }
+  .topnav .logo { font-size:12px; margin-right:6px; }
   .sidebar-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.5); z-index:1000; }
   .sidebar-overlay.show { display:block; }
   .hamburger { display:inline-block; }
@@ -1147,23 +1149,30 @@ label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; mar
 </head>
 <body>
 
-<nav class="sidebar">
-  <div class="logo" style="display:flex;align-items:center;gap:8px">
-    <img id="avatarImg" src="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--accent)">
-    <div>量化交易<span>交易员测试</span></div>
+<!-- Top Navigation -->
+<nav class="topnav">
+  <span class="logo"><img id="avatarImg" src="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;border:1px solid var(--accent);vertical-align:middle;margin-right:8px;">◈ QUANT</span>
+  <a href="#dashboard" class="active" data-page="dashboard">仪表盘</a>
+  <a href="#strategy_op" data-page="strategy_op">策略</a>
+  <a href="#monitor" data-page="monitor">监控</a>
+  <a href="#analysis" data-page="analysis">分析</a>
+  <a href="#logs" data-page="logs">日志</a>
+  <a href="#settings" data-page="settings">设置</a>
+  <span class="spacer"></span>
+  <span id="botStatus" class="badge off" style="margin-right:12px;">离线</span>
+  <span id="liveTime" style="font-size:11px;color:var(--text);margin-right:16px;">--</span>
+  <div class="user-area" onclick="toggleUserMenu()" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+    <img id="avatarTop" src="" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--accent);object-fit:cover;display:none;">
+    <span id="usernameDisplay" style="color:var(--accent);font-size:12px;">用户</span>
+    <div class="user-dropdown" id="userDropdown" style="display:none;position:absolute;top:44px;right:16px;background:var(--card);border:1px solid var(--accent);border-radius:6px;min-width:120px;z-index:200;padding:4px 0;">
+      <a href="#" onclick="event.preventDefault();showProfileModal();">编辑资料</a>
+      <a href="#" onclick="event.preventDefault();showPwdModal2();">修改密码</a>
+      <a href="#" onclick="event.preventDefault();doLogout();" style="color:var(--red);">退出</a>
+    </div>
   </div>
-  <a href="#dashboard" class="active" data-page="dashboard"><span class="icon">📋</span> 仪表盘</a>
-  <a href="#strategy_op" data-page="strategy_op"><span class="icon">🎯</span> 策略配置</a>
-  <a href="#monitor" data-page="monitor"><span class="icon">📈</span> 数据监控</a>
-  <a href="#analysis" data-page="analysis"><span class="icon">📊</span> 资产分析</a>
-  <a href="#logs" data-page="logs"><span class="icon">📝</span> 系统日志</a>
-  <a href="#settings" data-page="settings"><span class="icon">🔧</span> 设置中心</a>
 </nav>
 
-<div class="main">
-  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 <div class="header">
-    <button class="hamburger" onclick="toggleSidebar()" title="菜单">☰</button>
     <h2 id="pageTitle">仪表盘</h2>
     <div class="right">
       <div class="user-area" onclick="toggleUserMenu()" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-right:16px;">
@@ -1194,20 +1203,11 @@ document.querySelectorAll('.sidebar a').forEach(a=>{
   a.addEventListener('click',e=>{e.preventDefault();navigate(a.dataset.page);});
 });
 
-function toggleSidebar(){
-  const sb=document.querySelector('.sidebar');
-  const ov=document.getElementById('sidebarOverlay');
-  sb.classList.toggle('open');
-  if(ov)ov.classList.toggle('show');
-}
 async function navigate(page){
   currentPage=page;
-  document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active'));
-  document.querySelector(`[data-page="${page}"]`).classList.add('active');
+  document.querySelectorAll('.topnav a[data-page]').forEach(a=>a.classList.remove('active'));
+  document.querySelector(`.topnav a[data-page="${page}"]`).classList.add('active');
   document.getElementById('pageTitle').textContent=pages[page];
-  // 手机端：切换页面后关闭侧边栏
-  const sb=document.querySelector('.sidebar');
-  if(sb.classList.contains('open'))toggleSidebar();
   if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null;}
   await loadPage(page);
 }
@@ -1793,7 +1793,12 @@ async function saveApiKeys(){
   const sk=document.getElementById('set_secret_key')?.value||'';
   const px=document.getElementById('set_proxy_url')?.value||'';
   const r=await api('/apikeys/save',{method:'POST',body:JSON.stringify({apiKey:ak,secretKey:sk,proxyUrl:px})});
-  if(r.ok){alert('API Key 已保存，2秒后自动刷新');setTimeout(()=>location.reload(),2000);}else{alert('保存失败');}
+  if(r.ok){
+    document.getElementById('set_api_key').value='';
+    document.getElementById('set_secret_key').value='';
+    alert('API Key 已保存，2秒后自动刷新');
+    setTimeout(()=>location.reload(),2000);
+  }else{alert('保存失败');}
 }
 
 (async function(){
@@ -2305,7 +2310,11 @@ def _handle_api(path, body=None, qs=""):
             f_positions = executor.submit(lambda: get_positions_from_exchange(username))
             f_funding = executor.submit(get_funding_rates)
             f_fee = executor.submit(lambda: get_fee_info(username))
-            f_tickers = executor.submit(lambda: get_tickers(_get_public_binance(username) if username else None))
+            # 构造需要的交易对列表，只查这些
+            wl_syms = [f"{s[:-4]}/{s[-4:]}:{s[-4:]}" if s.endswith("USDT") and "/" not in s else s for s in watchlist]
+            env_syms = [f"{s.strip()[:-4]}/{s.strip()[-4:]}:{s.strip()[-4:]}" if s.strip().endswith("USDT") and "/" not in s.strip() else s.strip() for s in os.getenv("SYMBOLS","ETHUSDT,BTCUSDT").split(",")]
+            _ticker_syms = list(dict.fromkeys(wl_syms + env_syms))
+            f_tickers = executor.submit(lambda: get_tickers(_get_public_binance(username) if username else None, _ticker_syms))
             f_next_funding = executor.submit(get_next_funding_time)
 
             def _fetch_trades():
