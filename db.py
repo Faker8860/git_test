@@ -8,8 +8,10 @@ import sqlite3
 import hashlib
 import uuid
 import os
+import secrets
+import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 BASE_DIR = Path(__file__).parent
 DB_PATH = BASE_DIR / "accounts.db"
@@ -40,14 +42,49 @@ def _init_tables(conn):
             token TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             created_at TEXT DEFAULT (datetime('now','localtime')),
+            expires_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
     """)
 
 
+# Token 有效期（天）
+TOKEN_EXPIRE_DAYS = 7
+
+
 def hash_password(password: str) -> str:
-    """SHA-256 密码哈希."""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """PBKDF2 加盐密码哈希。格式: pbkdf2$salt$hash"""
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode(), 100000)
+    return f"pbkdf2${salt}${dk.hex()}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """验证密码。兼容旧的 SHA-256 格式（自动升级）。"""
+    if stored_hash.startswith("pbkdf2$"):
+        try:
+            _, salt, hashed = stored_hash.split("$")
+            dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode(), 100000)
+            return dk.hex() == hashed
+        except ValueError:
+            return False
+    # 兼容旧 SHA-256 格式
+    old_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return old_hash == stored_hash
+
+
+def _maybe_upgrade_hash(username: str, password: str, stored_hash: str):
+    """如果密码是旧格式，自动升级为 PBKDF2 格式."""
+    if not stored_hash.startswith("pbkdf2$"):
+        conn = get_db()
+        try:
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (hash_password(password), username)
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def generate_token() -> str:
@@ -103,16 +140,20 @@ def login_user(username: str, password: str) -> dict:
 
         if not user:
             return {"ok": False, "error": "用户不存在"}
-        if user["password_hash"] != hash_password(password):
+        if not verify_password(password, user["password_hash"]):
             return {"ok": False, "error": "密码错误"}
+        # 自动升级旧格式密码
+        _maybe_upgrade_hash(username, password, user["password_hash"])
 
-        # 生成会话令牌
+        # 生成会话令牌，7天有效期
         token = generate_token()
-        # 清除旧会话
+        expires = (datetime.now() + timedelta(days=TOKEN_EXPIRE_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        # 清除旧会话 + 过期会话
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
+        conn.execute("DELETE FROM sessions WHERE expires_at < datetime('now','localtime')")
         conn.execute(
-            "INSERT INTO sessions (token, user_id) VALUES (?, ?)",
-            (token, user["id"])
+            "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
+            (token, user["id"], expires)
         )
         conn.commit()
 
@@ -126,15 +167,17 @@ def login_user(username: str, password: str) -> dict:
 
 
 def get_user_by_token(token: str) -> dict | None:
-    """通过 token 获取当前用户，token 无效返回 None."""
+    """通过 token 获取当前用户，token 无效或过期返回 None."""
     if not token:
         return None
     conn = get_db()
     try:
+        # 先清理过期会话
+        conn.execute("DELETE FROM sessions WHERE expires_at < datetime('now','localtime')")
         row = conn.execute("""
             SELECT u.id, u.username FROM users u
             JOIN sessions s ON u.id = s.user_id
-            WHERE s.token = ?
+            WHERE s.token = ? AND (s.expires_at IS NULL OR s.expires_at > datetime('now','localtime'))
         """, (token,)).fetchone()
         if row:
             return {"id": row["id"], "username": row["username"]}
@@ -151,6 +194,32 @@ def logout_user(token: str):
     try:
         conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def reset_password(username: str, old_password: str, new_password: str) -> dict:
+    """重置密码。需要验证旧密码。"""
+    username = username.strip()
+    if not old_password or not new_password:
+        return {"ok": False, "error": "密码不能为空"}
+    if len(new_password) < 4:
+        return {"ok": False, "error": "新密码至少 4 位"}
+    conn = get_db()
+    try:
+        user = conn.execute(
+            "SELECT password_hash FROM users WHERE username = ?", (username,)
+        ).fetchone()
+        if not user:
+            return {"ok": False, "error": "用户不存在"}
+        if not verify_password(old_password, user["password_hash"]):
+            return {"ok": False, "error": "旧密码错误"}
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE username = ?",
+            (hash_password(new_password), username)
+        )
+        conn.commit()
+        return {"ok": True}
     finally:
         conn.close()
 

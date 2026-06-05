@@ -1495,8 +1495,71 @@ def check_all_volty_fills():
             fetch_positions_info()
 
 
-def run():
+def _reload_config():
+    """重新从环境变量加载策略参数（用户 .env 覆盖后调用）."""
+    global STRATEGY_TYPE, SYMBOLS_RAW, TIMEFRAME_MINUTES, MA_TYPE, MA_LEN
+    global CROSS_MULT, DELAY_MINUTES, POSITION_PCT, LEVERAGE, STOP_LOSS_PCT
+    global TAKE_PROFIT_PCT, TRADE_TYPE, MAX_ORDER_USDT, MIN_ORDER_USDT
+    global ACTIVATION_DELAY_MINUTES, VOLTY_LENGTH, VOLTY_ATR_MULT, MARGIN_MODE
+    STRATEGY_TYPE = os.getenv("STRATEGY_TYPE", "TEMA")
+    SYMBOLS_RAW = os.getenv("SYMBOLS", "ETHUSDT")
+    TIMEFRAME_MINUTES = int(os.getenv("TIMEFRAME_MINUTES", "1"))
+    MA_TYPE = os.getenv("MA_TYPE", "TEMA")
+    MA_LEN = int(os.getenv("MA_LEN", "8"))
+    CROSS_MULT = int(os.getenv("CROSS_MULT", "3"))
+    DELAY_MINUTES = int(os.getenv("DELAY_MINUTES", "5"))
+    POSITION_PCT = float(os.getenv("POSITION_PCT", "60"))
+    LEVERAGE = int(os.getenv("LEVERAGE", "3"))
+    STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "5"))
+    TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "1.5"))
+    TRADE_TYPE = os.getenv("TRADE_TYPE", "BOTH")
+    MAX_ORDER_USDT = float(os.getenv("MAX_ORDER_USDT", "0"))
+    MIN_ORDER_USDT = float(os.getenv("MIN_ORDER_USDT", "11"))
+    ACTIVATION_DELAY_MINUTES = int(os.getenv("ACTIVATION_DELAY_MINUTES", "0"))
+    VOLTY_LENGTH = int(os.getenv("VOLTY_LENGTH", "5"))
+    VOLTY_ATR_MULT = float(os.getenv("VOLTY_ATR_MULT", "0.75"))
+    MARGIN_MODE = os.getenv("MARGIN_MODE", "isolated")
+
+
+def run(username=None):
     global running, SYMBOLS
+    global STRATEGIES_FILE, STATE_FILE, TRADE_FILE, LOG_FILE, TRADE_LOG, binance
+
+    if username:
+        user_dir = BASE_DIR / "user_data" / username
+        user_dir.mkdir(parents=True, exist_ok=True)
+        env_file = user_dir / ".env"
+        if env_file.exists():
+            load_dotenv(env_file, override=True)
+        # 重新读取配置（可能被用户 .env 覆盖）
+        _reload_config()
+        # 重新映射文件路径
+        STRATEGIES_FILE = user_dir / "strategies.json"
+        STATE_FILE = user_dir / "strategy_state.json"
+        TRADE_FILE = user_dir / "trades.json"
+        # 重新配置日志文件
+        for h in list(log.handlers):
+            if isinstance(h, logging.FileHandler):
+                log.removeHandler(h)
+        log.addHandler(logging.FileHandler(user_dir / "strategy.log", encoding="utf-8"))
+        log.addHandler(logging.FileHandler(user_dir / "trade_history.log", encoding="utf-8"))
+        LOG_FILE = user_dir / "strategy.log"
+        TRADE_LOG = user_dir / "trade_history.log"
+        log.info(f"多用户模式: {username}, 数据目录: {user_dir}")
+
+        # 重建币安连接（使用用户凭据 + 代理）
+        user_proxy = os.getenv("PROXY_URL", "")
+        try:
+            binance = ccxt.binance({
+                "apiKey": os.getenv("BINANCE_API_KEY"),
+                "secret": os.getenv("BINANCE_SECRET_KEY"),
+                "enableRateLimit": True,
+                "options": {"defaultType": "swap"},
+            })
+            if user_proxy:
+                binance.session.proxies.update({"http": user_proxy, "https": user_proxy})
+        except Exception as e:
+            log.error(f"创建币安客户端失败: {e}")
 
     load_strategy_overrides()
 
@@ -1601,4 +1664,8 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--user", type=str, default=None, help="Username for multi-user mode")
+    args = parser.parse_args()
+    run(username=args.user)

@@ -24,6 +24,18 @@ from fastapi.responses import JSONResponse
 
 BASE_DIR = Path(__file__).parent
 
+# ── 多用户支持 ──
+_user = None
+for i, arg in enumerate(sys.argv):
+    if arg == "--user" and i + 1 < len(sys.argv):
+        _user = sys.argv[i + 1]
+        break
+if _user:
+    user_env = BASE_DIR / "user_data" / _user / ".env"
+    if user_env.exists():
+        load_dotenv(user_env, override=True)
+load_dotenv(BASE_DIR / ".env")  # 根配置作为回退
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -31,15 +43,20 @@ logging.basicConfig(
 )
 log = logging.getLogger("trading-bot")
 
-load_dotenv()
+# ── 代理配置 ──
+PROXY_URL = os.getenv("PROXY_URL", "")
+_proxies = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
-# ── 币安配置（U本位合约） ──────────────────────────
+# ── 币安配置（U本位合约, ccxt timeout 单位毫秒）──
 binance = ccxt.binance({
     "apiKey": os.getenv("BINANCE_API_KEY"),
     "secret": os.getenv("BINANCE_SECRET_KEY"),
     "enableRateLimit": True,
+    "timeout": 30000,
     "options": {"defaultType": "swap"},  # U本位永续合约
 })
+if _proxies:
+    binance.session.proxies.update(_proxies)
 if os.getenv("BINANCE_API_URL"):
     binance.urls["api"] = os.getenv("BINANCE_API_URL")
 
