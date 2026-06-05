@@ -384,7 +384,6 @@ def save_strategies(data, username=None):
 # ═══════════════════════ 用户个人信息 ═══════════════════════
 
 def load_profile(username: str) -> dict:
-    """加载用户个人信息."""
     pf = _user_file(username, "profile.json")
     try:
         with open(pf, "r") as f:
@@ -392,9 +391,7 @@ def load_profile(username: str) -> dict:
     except Exception:
         return {"nickname": username, "avatar": ""}
 
-
 def save_profile(username: str, data: dict):
-    """保存用户个人信息."""
     pf = _user_file(username, "profile.json")
     with open(pf, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -944,7 +941,7 @@ body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg
 .stat-card .value { font-size:20px; font-weight:bold; color:var(--title); }
 .stat-card .sub { font-size:11px; margin-top:2px; }
 .green { color:var(--green); } .red { color:var(--red); }
-.card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:16px; margin-bottom:16px; box-shadow:0 0 12px rgba(0,255,65,0.05); }
 .card h3 { font-size:14px; color:var(--title); margin-bottom:12px; display:flex; align-items:center; gap:8px; }
 .card h3::before { content:''; width:3px; height:14px; background:var(--accent); border-radius:2px; }
 table { width:100%; border-collapse:collapse; font-size:12px; }
@@ -1028,127 +1025,831 @@ HTML_USER = r"""<!DOCTYPE html>
 :root {
   --bg: #060606; --card: #0d0d0d; --border: rgba(0,255,65,0.12);
   --text: #999; --title: #e0e0e0; --accent: #00ff41; --green: #00ff41;
-  --red: #ff4466; --orange: #ff9500; --glow: 0 0 12px rgba(0,255,65,0.08);
+  --red: #ff4466; --orange: #ff9500; --sidebar: #080808; --hover: rgba(0,255,65,0.05);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: 'JetBrains Mono','Consolas','Microsoft YaHei',monospace; background:var(--bg); color:var(--text); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
-/* Top Nav */
-.topnav { display:flex; align-items:center; padding:0 20px; height:48px; background:#080808; border-bottom:1px solid var(--border); z-index:100; flex-shrink:0; }
-.topnav .logo { font-size:15px; font-weight:bold; color:var(--accent); margin-right:24px; text-shadow:0 0 10px rgba(0,255,65,0.3); }
-.topnav a { color:var(--text); text-decoration:none; font-size:12px; padding:0 14px; height:48px; display:flex; align-items:center; border-bottom:2px solid transparent; transition:all .2s; }
-.topnav a:hover, .topnav a.active { color:var(--accent); border-bottom-color:var(--accent); }
-.topnav .spacer { flex:1; }
-.topnav .user-area { display:flex; align-items:center; gap:10px; cursor:pointer; position:relative; }
-.topnav .user-area img { width:30px; height:30px; border-radius:50%; border:1px solid var(--accent); object-fit:cover; }
-.topnav .user-area .nick { font-size:12px; color:var(--title); }
-.topnav .user-area:hover .nick { color:var(--accent); }
-.user-dropdown { display:none; position:absolute; top:42px; right:0; background:var(--card); border:1px solid var(--accent); border-radius:6px; min-width:150px; z-index:200; box-shadow:0 0 20px rgba(0,255,65,0.1); }
-.user-dropdown.show { display:block; }
-.user-dropdown a { display:block; padding:10px 16px; font-size:11px; color:var(--text); text-decoration:none; border:none; height:auto; }
-.user-dropdown a:hover { background:rgba(0,255,65,0.05); color:var(--accent); border:none; }
-/* Content */
+body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; overflow:hidden; }
+.sidebar { width:200px; min-width:200px; background:var(--sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:16px 0; }
+.sidebar .logo { padding:0 20px 20px; font-size:16px; font-weight:bold; color:var(--title); border-bottom:1px solid var(--border); margin-bottom:8px; }
+.sidebar .logo span { font-size:11px; color:var(--green); display:block; margin-top:2px; }
+.sidebar a { display:flex; align-items:center; gap:8px; padding:10px 20px; color:var(--text); text-decoration:none; font-size:13px; transition:all .2s; border-left:2px solid transparent; }
+.sidebar a:hover, .sidebar a.active { background:var(--hover); color:var(--title); border-left-color:var(--accent); }
+.sidebar a .icon { width:18px; text-align:center; font-size:15px; }
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.header { padding:12px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; background:var(--card); }
+.header h2 { font-size:15px; color:var(--title); }
+.header .right { display:flex; align-items:center; gap:12px; font-size:12px; }
+.badge { padding:3px 8px; border-radius:10px; font-size:11px; }
+.badge.on { background:rgba(34,197,94,.15); color:var(--green); }
+.badge.off { background:rgba(239,68,68,.15); color:var(--red); }
 .content { flex:1; overflow-y:auto; padding:20px; }
-/* Cards */
 .stat-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; margin-bottom:16px; }
-.stat-card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:12px 14px; box-shadow:var(--glow); transition:all .2s; }
-.stat-card:hover { border-color:var(--accent); box-shadow:0 0 20px rgba(0,255,65,0.15); }
-.stat-card .label { font-size:10px; color:var(--text); margin-bottom:4px; text-transform:uppercase; letter-spacing:1px; }
-.stat-card .value { font-size:22px; font-weight:bold; color:var(--title); }
-.stat-card .sub { font-size:10px; margin-top:2px; }
+.stat-card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:12px 14px; cursor:default; box-shadow:0 0 12px rgba(0,255,65,0.05); transition:all .2s; }
+.stat-card:hover { border-color:var(--accent); box-shadow:0 0 20px rgba(0,255,65,0.12); }
+.stat-card.watch { cursor:pointer; transition:all .2s; }
+.stat-card.watch:hover { border-color:var(--accent); }
+.stat-card .label { font-size:11px; color:var(--text); margin-bottom:4px; }
+.stat-card .value { font-size:20px; font-weight:bold; color:var(--title); }
+.stat-card .sub { font-size:11px; margin-top:2px; }
 .green { color:var(--green); } .red { color:var(--red); }
-.card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:16px; margin-bottom:16px; box-shadow:var(--glow); }
-.card h3 { font-size:13px; color:var(--accent); margin-bottom:12px; text-transform:uppercase; letter-spacing:2px; }
-.card h3::before { content:'> '; opacity:.5; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:16px; margin-bottom:16px; box-shadow:0 0 12px rgba(0,255,65,0.05); }
+.card h3 { font-size:14px; color:var(--title); margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.card h3::before { content:''; width:3px; height:14px; background:var(--accent); border-radius:2px; }
 .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 @media(max-width:900px){.grid2{grid-template-columns:1fr}}
-table { width:100%; border-collapse:collapse; font-size:11px; }
-th { background:#0f0f0f; color:var(--accent); padding:8px 10px; text-align:left; font-weight:500; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid var(--border); }
-td { padding:7px 10px; border-bottom:1px solid rgba(255,255,255,.03); }
-tr:hover td { background:rgba(0,255,65,.02); }
-input,select { width:100%; padding:8px 10px; background:#0a0a0a; border:1px solid var(--border); border-radius:4px; color:var(--title); font-size:12px; font-family:inherit; }
-input:focus,select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 8px rgba(0,255,65,.1); }
-label { display:block; font-size:11px; color:var(--text); margin-bottom:4px; margin-top:12px; text-transform:uppercase; letter-spacing:1px; }
-.btn { padding:8px 16px; border:none; border-radius:4px; font-size:12px; cursor:pointer; font-weight:500; font-family:inherit; transition:all .2s; }
-.btn-primary { background:var(--accent); color:#000; text-shadow:none; }
-.btn-primary:hover { box-shadow:0 0 16px rgba(0,255,65,.3); }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th { background:#191e2a; color:var(--text); padding:8px 10px; text-align:left; font-weight:500; }
+td { padding:7px 10px; border-bottom:1px solid var(--border); }
+tr:hover td { background:rgba(255,255,255,.02); }
+input,select { width:100%; padding:8px 10px; background:#0d1117; border:1px solid var(--border); border-radius:4px; color:var(--title); font-size:13px; }
+input:focus,select:focus { outline:none; border-color:var(--accent); }
+label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; margin-top:12px; }
+.btn { padding:8px 16px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:500; }
+.btn-primary { background:var(--accent); color:#fff; }
 .btn-green { background:var(--green); color:#000; }
 .btn-red { background:var(--red); color:#fff; }
 .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
-.btn-outline:hover { border-color:var(--accent); color:var(--accent); }
-.btn-sm { padding:4px 10px; font-size:10px; }
-.btn:hover { opacity:.9; }
+.btn-sm { padding:4px 10px; font-size:11px; }
+.period-btn { padding:2px 8px; border:1px solid var(--border); background:transparent; color:var(--text); font-size:10px; cursor:pointer; border-radius:3px; margin:0 1px; }
+.period-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+.btn:hover { opacity:.85; }
 .form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.tag { display:inline-block; padding:2px 8px; border-radius:2px; font-size:10px; margin:1px; text-transform:uppercase; }
-.tag-info { background:rgba(0,255,65,.1); color:var(--accent); border:1px solid rgba(0,255,65,.2); }
-.tag-success { background:rgba(0,255,65,.1); color:var(--green); }
-.tag-warn { background:rgba(255,149,0,.1); color:var(--orange); }
-.tag-error { background:rgba(255,68,102,.1); color:var(--red); }
-.log-line { font-family:'JetBrains Mono','Consolas',monospace; font-size:10px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.02); line-height:1.5; }
+.tag { display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; margin:1px; }
+.tag-info { background:rgba(59,130,246,.15); color:#60a5fa; }
+.tag-success { background:rgba(34,197,94,.15); color:#4ade80; }
+.tag-warn { background:rgba(245,158,11,.15); color:#fbbf24; }
+.tag-error { background:rgba(239,68,68,.15); color:#f87171; }
+.log-line { font-family:'Cascadia Code',Consolas,monospace; font-size:11px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.02); line-height:1.5; }
 .chart-wrap { position:relative; height:280px; }
 .chart-wrap canvas { width:100%!important; height:100%!important; }
 .inline-input { display:flex; gap:6px; align-items:center; }
 .inline-input input { flex:1; }
-::-webkit-scrollbar { width:4px; }
+::-webkit-scrollbar { width:5px; }
 ::-webkit-scrollbar-track { background:var(--bg); }
-::-webkit-scrollbar-thumb { background:#1a1a1a; border-radius:2px; }
+::-webkit-scrollbar-thumb { background:#2a3040; border-radius:3px; }
 .watch-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-bottom:16px; }
-.watch-card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:10px 12px; box-shadow:var(--glow); }
-.watch-card .pair { font-size:12px; color:var(--accent); font-weight:bold; text-transform:uppercase; }
-.watch-card .price { font-size:18px; color:var(--title); margin:4px 0; }
-.watch-card .change { font-size:10px; }
+.watch-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+.watch-card .pair { font-size:13px; color:var(--title); font-weight:bold; }
+.watch-card .price { font-size:18px; color:var(--title); font-weight:bold; margin:4px 0; }
+.watch-card .change { font-size:11px; }
 .watch-card .remove { float:right; color:var(--red); cursor:pointer; font-size:14px; opacity:.5; }
 .watch-card .remove:hover { opacity:1; }
-.modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.85); z-index:1000; align-items:center; justify-content:center; }
+.modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.7); z-index:1000; align-items:center; justify-content:center; }
 .modal-overlay.show { display:flex; }
-.modal { background:var(--card); border:1px solid var(--accent); border-radius:8px; padding:24px; width:380px; max-width:90vw; box-shadow:0 0 30px rgba(0,255,65,0.1); }
-.modal h3 { font-size:14px; color:var(--accent); margin-bottom:16px; text-transform:uppercase; letter-spacing:2px; }
+.modal { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; width:360px; max-width:90vw; }
+.modal h3 { font-size:15px; color:var(--title); margin-bottom:16px; }
 .modal input { margin-bottom:12px; }
 .modal .btn-row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
-.modal .error-msg { color:var(--red); font-size:10px; margin-top:4px; display:none; }
-.badge { padding:3px 8px; border-radius:10px; font-size:10px; text-transform:uppercase; }
-.badge.on { background:rgba(0,255,65,.1); color:var(--green); border:1px solid rgba(0,255,65,.3); }
-.badge.off { background:rgba(255,68,102,.1); color:var(--red); border:1px solid rgba(255,68,102,.3); }
+.modal .error-msg { color:var(--red); font-size:11px; margin-top:4px; display:none; }
 .tab-nav { display:flex; gap:0; margin-bottom:12px; border-bottom:1px solid var(--border); }
-.tab-nav button { padding:8px 16px; border:none; background:transparent; color:var(--text); font-size:11px; cursor:pointer; border-bottom:2px solid transparent; transition:all .2s; font-family:inherit; text-transform:uppercase; letter-spacing:1px; }
+.tab-nav button { padding:8px 16px; border:none; background:transparent; color:var(--text); font-size:13px; cursor:pointer; border-bottom:2px solid transparent; transition:all .2s; }
 .tab-nav button.active { color:var(--accent); border-bottom-color:var(--accent); }
 .tab-content { display:none; }
 .tab-content.active { display:block; }
-.table-wrap { overflow-x:auto; }
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
 .table-wrap table { min-width:600px; }
+.hamburger { display:none; background:none; border:none; color:var(--title); font-size:22px; cursor:pointer; padding:4px; }
+.sidebar-overlay { display:none; }
+/* 手机适配 */
 @media(max-width:768px){
-  .topnav a { padding:0 8px; font-size:10px; }
-  .topnav .logo { margin-right:8px; font-size:13px; }
-  .stat-cards { grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); }
+  body { flex-direction:column; }
+  .sidebar { position:fixed; left:-220px; top:0; height:100%; z-index:1001; transition:left .3s; width:200px; }
+  .sidebar.open { left:0; box-shadow:4px 0 20px rgba(0,0,0,.8); }
+  .sidebar-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.5); z-index:1000; }
+  .sidebar-overlay.show { display:block; }
+  .hamburger { display:inline-block; }
+  .main { width:100%; flex:1; }
+  .header { padding:8px 12px; }
+  .header h2 { font-size:14px; }
+  .content { padding:8px; }
+  .stat-cards { grid-template-columns:repeat(2,1fr); gap:6px; }
+  .stat-card { padding:8px 10px; }
+  .stat-card .value { font-size:16px; }
+  .stat-card .label { font-size:10px; }
+  .grid2 { grid-template-columns:1fr; gap:8px; }
+  .form-row { grid-template-columns:1fr; gap:6px; }
+  .card { padding:10px; margin-bottom:8px; }
+  .card h3 { font-size:13px; }
+  .chart-wrap { height:220px; }
+  .watch-grid { grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:6px; }
+  .watch-card { padding:8px 10px; }
+  .watch-card .price { font-size:15px; }
+  table { font-size:10px; }
+  th,td { padding:5px 6px; }
+  .tab-nav button { padding:6px 10px; font-size:11px; }
+  .btn { padding:6px 12px; font-size:12px; }
+  .modal { width:90vw; padding:16px; }
+  .logo { font-size:14px; }
+  .badge { font-size:10px; }
+  input,select { font-size:16px !important; padding:8px; }
 }
 </style>
 </head>
 <body>
 
-<!-- Top Navigation -->
-<nav class="topnav">
-  <span class="logo">◈ QUANT</span>
-  <a href="#dashboard" data-page="dashboard" class="active">仪表盘</a>
-  <a href="#strategy_op" data-page="strategy_op">策略</a>
-  <a href="#monitor" data-page="monitor">监控</a>
-  <a href="#analysis" data-page="analysis">分析</a>
-  <a href="#logs" data-page="logs">日志</a>
-  <a href="#settings" data-page="settings">设置</a>
-  <span class="spacer"></span>
-  <span id="botStatus" class="badge off">离线</span>
-  <span id="liveTime" style="font-size:10px;color:var(--text);margin:0 10px;">--</span>
-  <div class="user-area" onclick="toggleUserMenu()">
-    <img id="avatarTop" src="" alt="?" onerror="this.style.display='none'" style="display:none;">
-    <span class="nick" id="nickTop">用户</span>
-    <div class="user-dropdown" id="userDropdown">
-      <a href="#" onclick="showProfileModal();return false;">编辑资料</a>
-      <a href="#" onclick="showPwdModal2();return false;">修改密码</a>
-      <a href="#" onclick="doLogout();return false;">退出登录</a>
-    </div>
+<nav class="sidebar">
+  <div class="logo" style="display:flex;align-items:center;gap:8px">
+    <img id="avatarImg" src="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--accent)">
+    <div>量化交易<span>交易员测试</span></div>
   </div>
+  <a href="#dashboard" class="active" data-page="dashboard"><span class="icon">📋</span> 仪表盘</a>
+  <a href="#strategy_op" data-page="strategy_op"><span class="icon">🎯</span> 策略配置</a>
+  <a href="#monitor" data-page="monitor"><span class="icon">📈</span> 数据监控</a>
+  <a href="#analysis" data-page="analysis"><span class="icon">📊</span> 资产分析</a>
+  <a href="#logs" data-page="logs"><span class="icon">📝</span> 系统日志</a>
+  <a href="#settings" data-page="settings"><span class="icon">🔧</span> 设置中心</a>
 </nav>
 
-<!-- Main Content -->
-<div class="content" id="mainContent"></div>
+<div class="main">
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+<div class="header">
+    <button class="hamburger" onclick="toggleSidebar()" title="菜单">☰</button>
+    <h2 id="pageTitle">仪表盘</h2>
+    <div class="right">
+      <div class="user-area" onclick="toggleUserMenu()" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-right:16px;">
+        <img id="avatarTop" src="" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--accent);object-fit:cover;display:none;" onerror="this.style.display='none'">
+        <span id="usernameDisplay" style="color:var(--accent);font-size:12px;"></span>
+        <div class="user-dropdown" id="userDropdown" style="display:none;position:absolute;top:40px;right:16px;background:var(--card);border:1px solid var(--accent);border-radius:6px;min-width:120px;z-index:200;">
+          <a href="#" onclick="event.preventDefault();showProfileModal();" style="display:block;padding:8px 14px;font-size:11px;color:var(--text);text-decoration:none;">编辑资料</a>
+          <a href="#" onclick="event.preventDefault();showPwdModal2();" style="display:block;padding:8px 14px;font-size:11px;color:var(--text);text-decoration:none;">修改密码</a>
+          <a href="#" onclick="event.preventDefault();doLogout();" style="display:block;padding:8px 14px;font-size:11px;color:var(--red);text-decoration:none;">退出登录</a>
+        </div>
+      </div>
+      <span id="liveTime">--</span>
+      <span id="botStatus" class="badge off">● 离线</span>
+    </div>
+  </div>
+  <div class="content" id="mainContent"></div>
+</div>
+
+<script>
+// ── 登录检查 ──
+if(!localStorage.getItem('token')){
+  window.location.href='/';
+}
+const pages={dashboard:'仪表盘',strategy_op:'策略配置',monitor:'数据监控',analysis:'资产分析',logs:'系统日志',settings:'设置中心'};
+let currentPage='dashboard', chartInstances={}, refreshTimer=null;
+
+document.querySelectorAll('.sidebar a').forEach(a=>{
+  a.addEventListener('click',e=>{e.preventDefault();navigate(a.dataset.page);});
+});
+
+function toggleSidebar(){
+  const sb=document.querySelector('.sidebar');
+  const ov=document.getElementById('sidebarOverlay');
+  sb.classList.toggle('open');
+  if(ov)ov.classList.toggle('show');
+}
+async function navigate(page){
+  currentPage=page;
+  document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active'));
+  document.querySelector(`[data-page="${page}"]`).classList.add('active');
+  document.getElementById('pageTitle').textContent=pages[page];
+  // 手机端：切换页面后关闭侧边栏
+  const sb=document.querySelector('.sidebar');
+  if(sb.classList.contains('open'))toggleSidebar();
+  if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null;}
+  await loadPage(page);
+}
+
+async function api(path,opts={}){
+  const init={};
+  if(opts.method==='POST'){init.method='POST';init.headers={'Content-Type':'application/json'};init.body=opts.body;}
+  const token=localStorage.getItem('token')||'';
+  let url='/api'+path;
+  if(token){url+=(url.includes('?')?'&':'?')+'token='+encodeURIComponent(token);}
+  const r=await fetch(url,init);
+  if(r.status===401){localStorage.removeItem('token');localStorage.removeItem('username');window.location.href='/';return{error:'unauthorized'};}
+  return r.json();
+}
+
+async function loadPage(page){
+  const mc=document.getElementById('mainContent');
+  const html=await(await fetch('/page/'+page)).text();
+  mc.innerHTML=html;
+  Object.values(chartInstances).forEach(c=>c.destroy?.());
+  chartInstances={};
+  if(page==='dashboard'){initDashboard();refreshTimer=setInterval(refreshDashboard,5000);}
+  if(page==='strategy_op')initStrategyOp();
+  if(page==='monitor'){initMonitor();refreshTimer=setInterval(refreshMonitor,8000);}
+  if(page==='analysis')initAnalysis();
+  if(page==='logs')initLogs();
+  if(page==='settings')initSettings();
+}
+
+function updateClock(){
+  document.getElementById('liveTime').textContent=new Date().toLocaleString('zh-CN');
+}
+setInterval(updateClock,1000);updateClock();
+
+// ── 认证 ──
+async function doLogout(){
+  await api('/auth/logout',{method:'POST',body:'{}'});
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  window.location.href='/';
+}
+(async function(){
+  const me=await api('/auth/me');
+  if(me.user){
+    document.getElementById('usernameDisplay').textContent=me.user.username;
+    localStorage.setItem('username',me.user.username);
+  }
+})();
+
+async function updateBotStatus(){
+  const d=await api('/status');
+  const el=document.getElementById('botStatus');
+  // 只在不刷新dashboard时更新bot状态
+  if (!refreshTimer) {
+    el.className='badge '+(d.running?'on':'off');
+    el.textContent=d.running?'● 运行中':'● 策略停止';
+  }
+}
+setInterval(updateBotStatus,5000);updateBotStatus();
+
+// ========== 仪表盘 ==========
+async function initDashboard(){
+  // 检查是否已配置币安密钥
+  const keys=await api('/apikeys');
+  if(!keys.configured){
+    document.getElementById('mainContent').innerHTML='<div class=\"card\" style=\"text-align:center;padding:60px 20px\"><h3 style=\"color:var(--orange);margin-bottom:16px\">⚙️ 请先配置币安 API 密钥</h3><p style=\"color:var(--text);margin-bottom:24px\">您还没有配置币安 API Key 和 Secret Key，<br>无法连接交易所查看行情和交易。</p><button class=\"btn btn-primary\" onclick=\"navigate(\'settings\')\">前往设置 →</button></div>';
+    return;
+  }
+  refreshDashboard();loadHistoryPositions();
+}
+
+async function refreshDashboard(){
+  const d=await api('/dashboard');
+  // 更新连接状态
+  const bs=document.getElementById('botStatus');
+  if (d.offline) {
+    bs.className='badge off'; bs.textContent='⚠ 币安离线(需VPN)';
+  }
+  const set=(id,v,cls)=>{const el=document.getElementById(id);if(el){el.textContent=v;if(cls)el.className=cls;}};
+  set('dashBalance',(d.balance||0).toFixed(2)+' USDT');
+  set('dashPnl',(d.unrealizedPnl||0).toFixed(2)+' USDT','value '+(d.unrealizedPnl>=0?'green':'red'));
+  set('dashTodayPnl',(d.todayPnl||0).toFixed(2)+' USDT','value '+(d.todayPnl>=0?'green':'red'));
+  set('dashPosCount',d.positionCount||0);
+  set('dashTradeCount',d.todayTrades||0);
+
+  // 下次资金费率结算倒计时
+  if(d.nextFunding){
+    const cd=document.getElementById('dashFundingCD');
+    if(cd){
+      const secs=d.nextFunding.seconds_left||0;
+      const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60), s=secs%60;
+      cd.textContent=h+'时'+m+'分'+s+'秒';
+      cd.style.color=secs<1800?'var(--orange)':'var(--title)';
+    }
+    setText('dashFeeRate',(d.feeInfo?.takerPct||0.04).toFixed(3)+'% taker');
+    setText('dashFeeRateVal',(d.feeInfo?.takerPct||0.04).toFixed(3)+'%');
+  }
+
+  // 当前持仓表格
+  const ct=document.getElementById('currentPositions');
+  if(ct && d.positions){
+    if(d.positions.length===0){
+      ct.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--text)">暂无持仓</td></tr>';
+    }else{
+      ct.innerHTML=d.positions.map(p=>{
+        const side=p.side==='LONG'?'多头':'空头';
+        const sideColor=p.side==='LONG'?'var(--green)':'var(--red)';
+        const pnl=(p.unrealizedPnl||0);
+        const pnlColor=pnl>=0?'var(--green)':'var(--red)';
+        const fr=(p.fundingRate||0);
+        const frColor=fr>0?'var(--green)':(fr<0?'var(--red)':'var(--text)');
+        return `<tr>
+          <td>${(p.symbol||'').replace(':USDT','')}</td>
+          <td style="color:${sideColor};font-weight:bold">${side}</td>
+          <td>${(p.entryPrice||0).toFixed(4)}</td>
+          <td>${(p.markPrice||0).toFixed(4)}</td>
+          <td style="color:var(--red)">${(p.liquidationPrice||0).toFixed(4)}</td>
+          <td>${p.leverage||0}x</td>
+          <td>${p.marginMode||'--'}</td>
+          <td>${p.contracts||0}</td>
+          <td style="color:${frColor};font-size:11px" title="${p.fundingLabel||''}">${fr>=0?'+':''}${fr.toFixed(4)}%</td>
+          <td style="font-size:11px">${(p.openFee||0).toFixed(4)}+${(p.closeFee||0).toFixed(4)}=<b>${(p.totalFee||0).toFixed(4)}U</b></td>
+          <td style="color:${pnlColor};font-weight:bold">${pnl>=0?'+':''}${pnl.toFixed(2)}U</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  // 自选币种
+  const wg=document.getElementById('watchGrid');
+  if(wg && d.watchlist){
+    wg.innerHTML=d.watchlist.map(w=>{
+      const ch=w.change||0;
+      const cc=ch>=0?'green':'red';
+      return `<div class="watch-card">
+        <span class="remove" onclick="removeWatch('${w.symbol}')" title="移除">×</span>
+        <div class="pair">${(w.symbol||'').replace(':USDT','')}</div>
+        <div class="price">${(w.price||0).toFixed(w.symbol?.startsWith('BTC')?2:4)}</div>
+        <div class="change ${cc}">${ch>=0?'+':''}${ch.toFixed(2)}%</div>
+      </div>`;
+    }).join('');
+  }
+
+  // 收益图 - 支持时间周期切换
+  async function loadEquity(period,btn){
+    document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
+    if(btn)btn.classList.add('active');
+    try{
+      const resp=await fetch('/api/equity?period='+period);
+      const d=await resp.json();
+      if(!d.labels||!d.labels.length)return;
+      const ctx=document.getElementById('profitChart')?.getContext('2d');
+      if(!ctx)return;
+      if(chartInstances.profit)chartInstances.profit.destroy();
+      const isUp=d.data[d.data.length-1]>=d.data[0];
+      chartInstances.profit=new Chart(ctx,{
+        type:'line',
+        data:{
+          labels:d.labels,
+          datasets:[{label:'权益曲线',data:d.data,borderColor:isUp?'#22c55e':'#ef4444',backgroundColor:isUp?'rgba(34,197,94,.08)':'rgba(239,68,68,.08)',fill:true,tension:.3,pointRadius:0}]
+        },
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          interaction:{intersect:false,mode:'index'},
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toFixed(2)}}},
+          scales:{x:{ticks:{color:'#555',font:{size:9},maxTicksLimit:12},grid:{color:'#1c2333'}},y:{ticks:{color:'#555',font:{size:9},callback:v=>'$'+v.toFixed(0)},grid:{color:'#1c2333'}}}
+        }
+      });
+    }catch(e){}
+  }
+
+  // 收益图（首次加载）
+  if(!chartInstances.profit)loadEquity('1D');
+
+  // 最近交易
+  const rt=document.getElementById('recentTrades');
+  if(rt && d.recentTrades){
+    const names={'long_entry':'做多','exit_long':'平多','short_entry':'做空','exit_short':'平空',
+      'flip_close_long':'翻转平多','flip_close_short':'翻转平空','exit_manual':'手动平仓',
+      '买入':'买入','卖出':'卖出','手动买入':'手动买入','手动卖出':'手动卖出'};
+    rt.innerHTML=d.recentTrades.map(t=>`<tr>
+      <td>${t.time||''}</td><td>${t.symbol||''}</td><td>${names[t.action]||t.action||'--'}</td>
+      <td>${t.contracts||''}</td><td>${t.price||''}</td><td>${t.usdt_value||''}U</td></tr>`).join('');
+  }
+}
+
+async function loadHistoryPositions(){
+  const d=await api('/history/positions');
+  setText('dashTotalRealPnl',(d.totalPnl||0).toFixed(2)+' USDT');
+  const el=document.getElementById('dashTotalRealPnl');
+  if(el)el.className='value '+(d.totalPnl>=0?'green':'red');
+  setText('histTotal',d.totalClosed||0);
+  setText('histTotalPnl',(d.totalPnl||0).toFixed(2));
+  setText('histWinRate',(d.winRate||0).toFixed(1)+'%');
+  const ht=document.getElementById('historyPositions');
+  if(ht && d.positions){
+    if(d.positions.length===0){
+      ht.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text)">暂无交易记录</td></tr>';
+    }else{
+      ht.innerHTML=d.positions.map(p=>{
+        const pnl=p.realizedPnl||0;
+        const pnlColor=pnl>=0?'var(--green)':'var(--red)';
+        const actionColor=p.action?.includes('平')||p.action?.includes('卖')?'var(--orange)':(p.action?.includes('买')?'var(--green)':'var(--text)');
+        const isManual=p.isManual?' (手动)':'';
+        return `<tr>
+          <td>${p.entryTime||p.exitTime||''}</td>
+          <td>${(p.symbol||'').replace(':USDT','')}</td>
+          <td style="color:${actionColor}">${p.action||(p.side==='LONG'?'多头':'空头')}${isManual}</td>
+          <td>${(p.price||p.entryPrice||0).toFixed(4)}</td>
+          <td>${p.contracts||0}</td>
+          <td>${(p.usdtValue||0).toFixed(2)}U</td>
+          <td style="color:${pnlColor};font-weight:bold">${pnl>0?'+':''}${pnl.toFixed(2)}U</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+}
+
+function switchPosTab(tab,btn){
+  document.querySelectorAll('.tab-nav button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+  document.getElementById('tab'+(tab==='current'?'Current':'History')).classList.add('active');
+}
+
+async function addWatch(){
+  const inp=document.getElementById('watchInput');
+  const sym=(inp.value||'').toUpperCase().trim();
+  if(!sym){alert('输入币种');return;}
+  await api('/watchlist/add',{method:'POST',body:JSON.stringify({symbol:sym})});
+  inp.value='';
+  refreshDashboard();
+}
+
+async function removeWatch(sym){
+  await api('/watchlist/remove',{method:'POST',body:JSON.stringify({symbol:sym})});
+  refreshDashboard();
+}
+
+// ========== 交易策略 ==========
+async function initStrategy(){
+  const d=await api('/status');
+  const cfg=await api('/config');
+  setText('stratStatus',d.running?'运行中':'已停止');
+  const sel=document.getElementById('stratStatus');
+  if(sel){sel.className='badge '+(d.running?'on':'off');}
+  setText('stratBtn',d.running?'停止策略':'启动策略');
+  const btn=document.getElementById('stratBtn');
+  if(btn)btn.onclick=()=>toggleBot(!d.running);
+  const actDelay=parseInt(cfg.ACTIVATION_DELAY_MINUTES||'0');
+  setText('stratActDelay',actDelay>0?actDelay+' 分钟':'立即启动');
+  const stype=cfg.STRATEGY_TYPE||'TEMA';
+  if(stype==='VOLTY'){
+    setText('stratName','Volty Expan Close Strategy');
+    setText('stratTypeLabel','波动性突破（ATR通道）');
+    setText('stratLogic','ATR通道突破，Bar收盘确认，每根K线更新入场价');
+  }else{
+    setText('stratName','OCC Strategy v8.13');
+    setText('stratTypeLabel','趋势跟随（TEMA 跨周期）');
+    setText('stratLogic','跨周期均线交叉 + 延迟确认');
+  }
+  const fields={stratSymbols:cfg.SYMBOLS,stratTF:cfg.TIMEFRAME_MINUTES+'分钟',stratMA:cfg.MA_TYPE+'('+cfg.MA_LEN+')',stratCross:cfg.CROSS_MULT+'x',stratDelay:cfg.DELAY_MINUTES+'分钟',stratPct:cfg.POSITION_PCT+'%',stratLev:cfg.LEVERAGE+'x',stratSL:cfg.STOP_LOSS_PCT+'%',stratType:cfg.TRADE_TYPE,stratVoltyLen:cfg.VOLTY_LENGTH||'5',stratVoltyMult:(cfg.VOLTY_ATR_MULT||'0.75')+'x'};
+  for(const[id,val]of Object.entries(fields))setText(id,val);
+  // 根据策略类型显示/隐藏行
+  const showTema=stype!=='VOLTY';
+  const showVolty=stype==='VOLTY';
+  document.getElementById('stratRowMA').style.display=showTema?'':'none';
+  document.getElementById('stratRowCross').style.display=showTema?'':'none';
+  document.getElementById('stratRowVoltyLen').style.display=showVolty?'':'none';
+  document.getElementById('stratRowVoltyMult').style.display=showVolty?'':'none';
+}
+
+function setText(id,v){const el=document.getElementById(id);if(el)el.textContent=v;}
+
+async function toggleBot(start){
+  await api(start?'/bot/start':'/bot/stop',{method:'POST',body:'{}'});
+  setTimeout(initStrategy,1500);
+}
+
+// ========== 策略配置 ==========
+let strategyList=[];
+async function initStrategyOp(){
+  // ── 策略密码验证 ──
+  const pwdCheck = await api('/strategy-password/status');
+  if (pwdCheck.hasPassword) {
+    const pwd = prompt('此策略页面已设置密码保护，请输入策略密码：');
+    if (!pwd) {
+      navigate('dashboard');
+      alert('已取消，返回仪表盘');
+      return;
+    }
+    const verify = await api('/strategy-password/verify', {
+      method: 'POST',
+      body: JSON.stringify({password: pwd})
+    });
+    if (!verify.ok) {
+      alert('策略密码错误！');
+      navigate('dashboard');
+      return;
+    }
+  }
+  // 加载策略状态
+  const d=await api('/status');
+  const cfg=await api('/config');
+  setText('stratStatus',d.running?'运行中':'已停止');
+  const sel=document.getElementById('stratStatus');
+  if(sel){sel.className='badge '+(d.running?'on':'off');}
+  setText('stratBtn',d.running?'停止策略':'启动策略');
+  const btn=document.getElementById('stratBtn');
+  if(btn)btn.onclick=()=>toggleBot(!d.running);
+  const actDelay=parseInt(cfg.ACTIVATION_DELAY_MINUTES||'0');
+  setText('stratActDelay',actDelay>0?actDelay+' 分钟':'立即启动');
+  const stype=cfg.STRATEGY_TYPE||'TEMA';
+  if(stype==='VOLTY'){
+    setText('stratName','Volty Expan Close Strategy');
+    setText('stratTypeLabel','波动性突破（ATR通道）');
+    setText('stratLogic','ATR通道突破，Bar收盘确认，每根K线更新入场价');
+  }else{
+    setText('stratName','OCC Strategy v8.13');
+    setText('stratTypeLabel','趋势跟随（TEMA 跨周期）');
+    setText('stratLogic','跨周期均线交叉 + 延迟确认');
+  }
+  const fields={stratSymbols:cfg.SYMBOLS,stratTF:cfg.TIMEFRAME_MINUTES+'分钟',stratMA:cfg.MA_TYPE+'('+cfg.MA_LEN+')',stratCross:cfg.CROSS_MULT+'x',stratDelay:cfg.DELAY_MINUTES+'分钟',stratPct:cfg.POSITION_PCT+'%',stratLev:cfg.LEVERAGE+'x',stratSL:cfg.STOP_LOSS_PCT+'%',stratType:cfg.TRADE_TYPE,stratVoltyLen:cfg.VOLTY_LENGTH||'5',stratVoltyMult:(cfg.VOLTY_ATR_MULT||'0.75')+'x'};
+  for(const[id,val]of Object.entries(fields))setText(id,val);
+  const showTema=stype!=='VOLTY';
+  const showVolty=stype==='VOLTY';
+  document.getElementById('stratRowMA').style.display=showTema?'':'none';
+  document.getElementById('stratRowCross').style.display=showTema?'':'none';
+  document.getElementById('stratRowVoltyLen').style.display=showVolty?'':'none';
+  document.getElementById('stratRowVoltyMult').style.display=showVolty?'':'none';
+  // 加载策略配置列表
+  loadStrategyList();
+}
+function toggleCfgStrategyFields(){
+  const stype=document.getElementById('cfgStrategyType')?.value||'TEMA';
+  const tema=document.getElementById('cfgTemaGroup');
+  const volty=document.getElementById('cfgVoltyGroup');
+  const delayRow=document.getElementById('cfgDelayMin')?.closest('.form-row');
+  if(tema)tema.style.display=stype==='VOLTY'?'none':'';
+  if(volty)volty.style.display=stype==='VOLTY'?'':'none';
+}
+function resetStrategyForm(){
+  document.getElementById('cfgEditId').value='';
+  document.getElementById('cfgSymbol').value='ETHUSDT';
+  document.getElementById('cfgStrategyType').value='TEMA';
+  document.getElementById('cfgTimeframe').value='1';
+  document.getElementById('cfgMAType').value='TEMA';
+  document.getElementById('cfgMALen').value='8';
+  document.getElementById('cfgCrossMult').value='3';
+  document.getElementById('cfgDelayMin').value='5';
+  document.getElementById('cfgVoltyLength').value='5';
+  document.getElementById('cfgVoltyAtrMult').value='0.75';
+  document.getElementById('cfgPositionPct').value='20';
+  document.getElementById('cfgLeverage').value='3';
+  document.getElementById('cfgLevLabel').textContent='3x';
+  document.getElementById('cfgStopLoss').value='5';
+  document.getElementById('cfgTradeType').value='BOTH';
+  document.getElementById('cfgActDelay').value='0';
+  document.getElementById('cfgMaxOrder').value='0';
+  document.getElementById('cfgMinOrder').value='11';
+  toggleCfgStrategyFields();
+}
+async function loadStrategyList(){
+  const d=await api('/strategies');
+  strategyList=d.strategies||[];
+  const def=d.defaults||{};
+  document.getElementById('cfgTimeframe').value=def.TIMEFRAME_MINUTES||'1';
+  document.getElementById('cfgStrategyType').value=def.STRATEGY_TYPE||'TEMA';
+  document.getElementById('cfgMAType').value=def.MA_TYPE||'TEMA';
+  document.getElementById('cfgMALen').value=def.MA_LEN||'8';
+  document.getElementById('cfgCrossMult').value=def.CROSS_MULT||'3';
+  document.getElementById('cfgDelayMin').value=def.DELAY_MINUTES||'5';
+  document.getElementById('cfgVoltyLength').value=def.VOLTY_LENGTH||'5';
+  document.getElementById('cfgVoltyAtrMult').value=def.VOLTY_ATR_MULT||'0.75';
+  document.getElementById('cfgPositionPct').value=def.POSITION_PCT||'20';
+  document.getElementById('cfgLeverage').value=def.LEVERAGE||'3';
+  document.getElementById('cfgLevLabel').textContent=(def.LEVERAGE||'3')+'x';
+  document.getElementById('cfgStopLoss').value=def.STOP_LOSS_PCT||'5';
+  document.getElementById('cfgMarginMode').value=def.MARGIN_MODE||'isolated';
+  document.getElementById('cfgTradeType').value=def.TRADE_TYPE||'BOTH';
+  document.getElementById('cfgActDelay').value=def.ACTIVATION_DELAY_MINUTES||'0';
+  toggleCfgStrategyFields();
+  renderStrategyTable();
+}
+function renderStrategyTable(){
+  const tb=document.getElementById('strategyTableBody');
+  if(!tb)return;
+  if(strategyList.length===0){
+    tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text)">暂无策略配置，请添加</td></tr>';
+  }else{
+    tb.innerHTML=strategyList.map((s,i)=>{
+      const stype=s.strategyType||'TEMA';
+      const stypeLabel=stype==='VOLTY'?'Volty':'TEMA';
+      const params=stype==='VOLTY'?`ATR${s.voltyLength||5}x${s.voltyAtrMult||0.75}`:`${s.maType||'TEMA'}(${s.maLen||8}) ${s.crossMult||3}x`;
+      return `<tr>
+      <td style="color:var(--title);font-weight:bold">${s.symbol||''}</td>
+      <td><span class="tag ${stype==='VOLTY'?'tag-warn':'tag-info'}">${stypeLabel}</span></td>
+      <td>${s.timeframe||1}分钟</td>
+      <td>${params}</td>
+      <td>${s.positionPct||20}%</td>
+      <td>${s.leverage||3}x</td>
+      <td>${s.marginMode==='cross'?'全仓':'逐仓'}</td>
+      <td>${s.maxOrder>0?s.maxOrder+'U':'默认'}</td>
+      <td>${s.stopLoss||5}%</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="editStrategy(${i})">编辑</button>
+        <button class="btn btn-red btn-sm" style="margin-left:4px" onclick="deleteStrategy(${i})">✕</button>
+      </td>
+    </tr>`}).join('');
+  }
+}
+function editStrategy(idx){
+  const s=strategyList[idx];
+  if(!s)return;
+  document.getElementById('cfgEditId').value=idx;
+  document.getElementById('cfgSymbol').value=s.symbol||'ETHUSDT';
+  document.getElementById('cfgStrategyType').value=s.strategyType||'TEMA';
+  document.getElementById('cfgTimeframe').value=s.timeframe||'1';
+  document.getElementById('cfgMAType').value=s.maType||'TEMA';
+  document.getElementById('cfgMALen').value=s.maLen||'8';
+  document.getElementById('cfgCrossMult').value=s.crossMult||'3';
+  document.getElementById('cfgDelayMin').value=s.delayMin||'5';
+  document.getElementById('cfgVoltyLength').value=s.voltyLength||'5';
+  document.getElementById('cfgVoltyAtrMult').value=s.voltyAtrMult||'0.75';
+  document.getElementById('cfgPositionPct').value=s.positionPct||'20';
+  document.getElementById('cfgLeverage').value=s.leverage||'3';
+  document.getElementById('cfgLevLabel').textContent=(s.leverage||'3')+'x';
+  document.getElementById('cfgMarginMode').value=s.marginMode||'isolated';
+  document.getElementById('cfgStopLoss').value=s.stopLoss||'5';
+  document.getElementById('cfgTradeType').value=s.tradeType||'BOTH';
+  document.getElementById('cfgActDelay').value=s.actDelay||'0';
+  document.getElementById('cfgMaxOrder').value=s.maxOrder||'0';
+  document.getElementById('cfgMinOrder').value=s.minOrder||'11';
+  toggleCfgStrategyFields();
+}
+async function saveStrategyConfig(){
+  const idx=document.getElementById('cfgEditId').value;
+  const cfg={
+    symbol:document.getElementById('cfgSymbol').value,
+    strategyType:document.getElementById('cfgStrategyType').value,
+    timeframe:parseInt(document.getElementById('cfgTimeframe').value)||1,
+    maType:document.getElementById('cfgMAType').value,
+    maLen:parseInt(document.getElementById('cfgMALen').value)||8,
+    crossMult:parseInt(document.getElementById('cfgCrossMult').value)||3,
+    delayMin:parseInt(document.getElementById('cfgDelayMin').value)||5,
+    voltyLength:parseInt(document.getElementById('cfgVoltyLength').value)||5,
+    voltyAtrMult:parseFloat(document.getElementById('cfgVoltyAtrMult').value)||0.75,
+    positionPct:parseInt(document.getElementById('cfgPositionPct').value)||20,
+    leverage:parseInt(document.getElementById('cfgLeverage').value)||3,
+    marginMode:document.getElementById('cfgMarginMode').value,
+    stopLoss:parseFloat(document.getElementById('cfgStopLoss').value)||5,
+    tradeType:document.getElementById('cfgTradeType').value,
+    actDelay:parseInt(document.getElementById('cfgActDelay').value)||0,
+    maxOrder:parseFloat(document.getElementById('cfgMaxOrder').value)||0,
+    minOrder:parseFloat(document.getElementById('cfgMinOrder').value)||11,
+  };
+  if(idx!==''){
+    strategyList[parseInt(idx)]=cfg;
+  }else{
+    // 检查重复
+    const dupIdx=strategyList.findIndex(s=>s.symbol===cfg.symbol);
+    if(dupIdx>=0)strategyList[dupIdx]=cfg;
+    else strategyList.push(cfg);
+  }
+  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
+  resetStrategyForm();
+  renderStrategyTable();
+  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
+  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
+  setTimeout(initStrategyOp,4000);
+  alert('策略配置已保存，正在重启机器人...');
+}
+async function deleteStrategy(idx){
+  if(!confirm('删除策略 '+strategyList[idx]?.symbol+' 的配置？'))return;
+  strategyList.splice(idx,1);
+  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
+  renderStrategyTable();
+  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
+  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
+}
+
+// ========== 数据监控 ==========
+async function initMonitor(){await refreshMonitor();document.getElementById('monSymbol')?.addEventListener('change',refreshMonitor);}
+async function refreshMonitor(){
+  const symbol=document.getElementById('monSymbol')?.value||'ETHUSDT';
+  const d=await api('/klines/'+symbol+'?limit=200');
+  const ctx=document.getElementById('klineChart')?.getContext('2d');
+  if(!ctx||!d.klines)return;
+  if(chartInstances.kline)chartInstances.kline.destroy();
+  const labels=d.klines.map(k=>new Date(k[0]).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
+  const closes=d.klines.map(k=>k[4]);
+  chartInstances.kline=new Chart(ctx,{
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {label:'价格',data:closes,borderColor:'#3b82f6',pointRadius:0,tension:.1,borderWidth:1.5},
+        {label:'MA5',data:d.ma5,borderColor:'#f59e0b',pointRadius:0,borderWidth:1,spanGaps:true},
+        {label:'MA10',data:d.ma10,borderColor:'#ef4444',pointRadius:0,borderWidth:1,spanGaps:true},
+        {label:'MA20',data:d.ma20,borderColor:'#8b5cf6',pointRadius:0,borderWidth:1,spanGaps:true},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#9599a3',font:{size:10}}}},
+      scales:{x:{ticks:{color:'#555',font:{size:9}},grid:{color:'#1c2333'}},y:{ticks:{color:'#555',font:{size:9}},grid:{color:'#1c2333'}}}
+    }
+  });
+  const last=closes[closes.length-1]||0;
+  setText('monPrice',last.toFixed(2));
+  setText('monVolume',(d.klines[d.klines.length-1]?.[5]||0).toFixed(1));
+
+  // 行情表
+  const mkts=await api('/market/overview');
+  const tb=document.getElementById('marketTable');
+  if(tb){
+    tb.innerHTML=mkts.slice(0,30).map((m,i)=>`<tr><td>${i+1}</td><td>${(m.symbol||'').replace(':USDT','')}</td><td>${(m.price||0).toFixed(4)}</td><td class="${(m.change||0)>=0?'green':'red'}">${(m.change||0)>=0?'+':''}${(m.change||0).toFixed(2)}%</td></tr>`).join('');
+  }
+}
+
+// ========== 资产分析 ==========
+async function initAnalysis(){
+  const d=await api('/analysis');
+  setText('anaWinRate',(d.winRate||0).toFixed(1)+'%');
+  setText('anaPnLRatio',d.pnlRatio||'--');
+  setText('anaTotalTrades',d.totalTrades||0);
+  setText('anaBestTrade',(d.bestTrade||0).toFixed(2)+'U');
+  const ctx1=document.getElementById('winRateChart')?.getContext('2d');
+  if(ctx1){
+    chartInstances.winRate=new Chart(ctx1,{type:'doughnut',data:{labels:['盈利','亏损'],datasets:[{data:[d.winRate||0,100-(d.winRate||0)],backgroundColor:['#22c55e','#ef4444']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#9599a3',font:{size:10}}}}}});
+  }
+  const ctx2=document.getElementById('pairChart')?.getContext('2d');
+  if(ctx2&&d.pairStats){
+    chartInstances.pair=new Chart(ctx2,{type:'bar',data:{labels:d.pairStats.map(p=>p.name),datasets:[{data:d.pairStats.map(p=>p.count),backgroundColor:'#3b82f6',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#555'},grid:{color:'#1c2333'}},y:{ticks:{color:'#555'},grid:{display:false}}}}});
+  }
+}
+
+// ========== 日志 ==========
+async function initLogs(){await loadLogLines();document.getElementById('logLevel')?.addEventListener('change',loadLogLines);}
+async function loadLogLines(){
+  const level=document.getElementById('logLevel')?.value||'ALL';
+  const d=await api('/logs?level='+level);
+  const div=document.getElementById('logContent');
+  if(div){
+    div.innerHTML=(d.lines||[]).map(l=>{
+      let cls='';if(l.includes('ERROR'))cls='tag-error';else if(l.includes('WARNING'))cls='tag-warn';else if(l.includes('INFO'))cls='tag-info';
+      return `<div class="log-line"><span class="tag ${cls}">${cls.replace('tag-','')}</span> ${l}</div>`;
+    }).join('');
+  }
+}
+
+// ========== 设置 ==========
+async function initSettings(){
+  const apis=await api('/apikeys');
+  const ak=document.getElementById('set_api_key');if(ak)ak.value=apis.apiKey||'';
+  const sk=document.getElementById('set_secret_key');if(sk)sk.value=apis.secretKey||'';
+  const px=document.getElementById('set_proxy_url');if(px)px.value=apis.proxyUrl||'';
+}
+let pwdCallback=null;
+function showPwdModal(callback){
+  pwdCallback=callback;
+  document.getElementById('pwdModal').classList.add('show');
+  document.getElementById('pwdInput').value='';
+  document.getElementById('pwdError').style.display='none';
+  setTimeout(()=>document.getElementById('pwdInput').focus(),100);
+}
+function cancelPwd(){
+  document.getElementById('pwdModal').classList.remove('show');
+  pwdCallback=null;
+}
+async function confirmPwd(){
+  const pwd=document.getElementById('pwdInput').value;
+  const r=await api('/verify-password',{method:'POST',body:JSON.stringify({password:pwd})});
+  if(r.ok){
+    document.getElementById('pwdModal').classList.remove('show');
+    if(pwdCallback){pwdCallback();pwdCallback=null;}
+  }else{
+    document.getElementById('pwdError').style.display='block';
+  }
+}
+async function saveApiKeys(){
+  const ak=document.getElementById('set_api_key')?.value||'';
+  const sk=document.getElementById('set_secret_key')?.value||'';
+  const px=document.getElementById('set_proxy_url')?.value||'';
+  const r=await api('/apikeys/save',{method:'POST',body:JSON.stringify({apiKey:ak,secretKey:sk,proxyUrl:px})});
+  if(r.ok){alert('API Key 已保存，2秒后自动刷新');setTimeout(()=>location.reload(),2000);}else{alert('保存失败');}
+}
+
+(async function(){
+  const a=await api('/avatar');
+  if(a.data){document.getElementById('avatarImg').src=a.data;}
+})();
+loadPage('dashboard');
+// ── Profile ──
+async function loadProfileUI(){
+  const p=await api('/profile');
+  document.getElementById('usernameDisplay').textContent=p.nickname||'用户';
+  const a=await api('/avatar');
+  const img=document.getElementById('avatarTop');
+  if(a.data){img.src=a.data;img.style.display='';}else{img.style.display='none';}
+}
+function toggleUserMenu(){
+  const d=document.getElementById('userDropdown');
+  d.style.display=d.style.display==='block'?'none':'block';
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.user-area'))document.getElementById('userDropdown').style.display='none';});
+function showProfileModal(){document.getElementById('profileModal').classList.add('show');api('/profile').then(p=>document.getElementById('profileNickname').value=p.nickname||'');}
+function closeProfileModal(){document.getElementById('profileModal').classList.remove('show');}
+async function uploadAvatar(){
+  const file=document.getElementById('profileAvatar').files[0];
+  if(!file)return alert('请选择图片');
+  const reader=new FileReader();
+  reader.onload=async e=>{const r=await api('/avatar/upload',{method:'POST',body:JSON.stringify({image:e.target.result})});alert(r.ok?'头像已上传':'上传失败');if(r.ok)loadProfileUI();};
+  reader.readAsDataURL(file);
+}
+async function saveProfile(){
+  const nick=document.getElementById('profileNickname').value.trim();
+  await api('/profile/save',{method:'POST',body:JSON.stringify({nickname:nick})});
+  closeProfileModal();loadProfileUI();
+}
+function showPwdModal2(){document.getElementById('pwdModal2').classList.add('show');}
+function closePwdModal2(){document.getElementById('pwdModal2').classList.remove('show');}
+async function changePassword(){
+  const op=document.getElementById('oldPwd').value,np=document.getElementById('newPwd').value,er=document.getElementById('pwdError2');
+  if(np.length<4){er.textContent='新密码至少4位';er.style.display='block';return;}
+  const r=await api('/auth/reset-password',{method:'POST',body:JSON.stringify({oldPassword:op,newPassword:np})});
+  if(r.ok){alert('密码已修改');closePwdModal2();}else{er.textContent=r.error||'修改失败';er.style.display='block';}
+}
+loadProfileUI();
+</script>
+
+<div class="modal-overlay" id="pwdModal">
+  <div class="modal">
+    <h3>请输入管理密码</h3>
+    <input type="password" id="pwdInput" placeholder="输入密码后保存" onkeydown="if(event.key==='Enter')confirmPwd()">
+    <div class="error-msg" id="pwdError">密码错误</div>
+    <div class="btn-row">
+      <button class="btn btn-outline btn-sm" onclick="cancelPwd()">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="confirmPwd()">确认</button>
+    </div>
+  </div>
+</div>
 
 <!-- Profile Edit Modal -->
 <div class="modal-overlay" id="profileModal">
@@ -1182,167 +1883,8 @@ label { display:block; font-size:11px; color:var(--text); margin-bottom:4px; mar
   </div>
 </div>
 
-<!-- Management Password Modal (legacy) -->
-<div class="modal-overlay" id="pwdModal">
-  <div class="modal">
-    <h3>验证密码</h3>
-    <input type="password" id="pwdInput" placeholder="输入管理密码">
-    <div class="error-msg" id="pwdError">密码错误</div>
-    <div class="btn-row">
-      <button class="btn btn-outline btn-sm" onclick="cancelPwd()">取消</button>
-      <button class="btn btn-primary btn-sm" onclick="confirmPwd()">确认</button>
-    </div>
-  </div>
-</div>
-
-<script>
-// ── Auth Check ──
-if(!localStorage.getItem('token')){ window.location.href='/'; }
-let currentPage='dashboard';
-
-// ── Navigation ──
-document.querySelectorAll('.topnav a[data-page]').forEach(a=>{
-  a.addEventListener('click',e=>{e.preventDefault();navigate(a.dataset.page);});
-});
-
-function navigate(page){
-  currentPage=page;
-  document.querySelectorAll('.topnav a[data-page]').forEach(a=>a.classList.toggle('active',a.dataset.page===page));
-  if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null;}
-  loadPage(page);
-}
-
-// ── User Menu ──
-function toggleUserMenu(){
-  document.getElementById('userDropdown').classList.toggle('show');
-}
-document.addEventListener('click',e=>{
-  if(!e.target.closest('.user-area')) document.getElementById('userDropdown').classList.remove('show');
-});
-
-// ── API ──
-async function api(path,opts={}){
-  const init={};
-  if(opts.method==='POST'){init.method='POST';init.headers={'Content-Type':'application/json'};init.body=opts.body;}
-  const token=localStorage.getItem('token')||'';
-  let url='/api'+path;
-  if(token){url+=(url.includes('?')?'&':'?')+'token='+encodeURIComponent(token);}
-  const r=await fetch(url,init);
-  if(r.status===401){localStorage.removeItem('token');localStorage.removeItem('username');window.location.href='/';return{error:'unauthorized'};}
-  return r.json();
-}
-
-// ── Logout ──
-async function doLogout(){
-  await api('/auth/logout',{method:'POST',body:'{}'});
-  localStorage.clear();
-  window.location.href='/';
-}
-
-// ── Profile ──
-async function loadProfileUI(){
-  const p=await api('/profile');
-  document.getElementById('nickTop').textContent=p.nickname||'用户';
-  const avatar=await api('/avatar');
-  const img=document.getElementById('avatarTop');
-  if(avatar.data){img.src=avatar.data;img.style.display='';}else{img.style.display='none';}
-}
-function showProfileModal(){
-  document.getElementById('userDropdown').classList.remove('show');
-  document.getElementById('profileModal').classList.add('show');
-  api('/profile').then(p=>document.getElementById('profileNickname').value=p.nickname||'');
-}
-function closeProfileModal(){document.getElementById('profileModal').classList.remove('show');}
-async function uploadAvatar(){
-  const file=document.getElementById('profileAvatar').files[0];
-  if(!file)return alert('请选择图片');
-  const reader=new FileReader();
-  reader.onload=async(e)=>{
-    const r=await api('/avatar/upload',{method:'POST',body:JSON.stringify({image:e.target.result})});
-    alert(r.ok?'头像已上传':'上传失败');
-    if(r.ok)loadProfileUI();
-  };
-  reader.readAsDataURL(file);
-}
-async function saveProfile(){
-  const nick=document.getElementById('profileNickname').value.trim();
-  await api('/profile/save',{method:'POST',body:JSON.stringify({nickname:nick})});
-  closeProfileModal();
-  loadProfileUI();
-}
-
-// ── Password Change ──
-function showPwdModal2(){document.getElementById('pwdModal2').classList.add('show');}
-function closePwdModal2(){document.getElementById('pwdModal2').classList.remove('show');}
-async function changePassword(){
-  const oldPwd=document.getElementById('oldPwd').value;
-  const newPwd=document.getElementById('newPwd').value;
-  const errEl=document.getElementById('pwdError2');
-  if(newPwd.length<4){errEl.textContent='新密码至少4位';errEl.style.display='block';return;}
-  const r=await api('/auth/reset-password',{method:'POST',body:JSON.stringify({oldPassword:oldPwd,newPassword:newPwd})});
-  if(r.ok){alert('密码已修改');closePwdModal2();}
-  else{errEl.textContent=r.error||'修改失败';errEl.style.display='block';}
-}
-
-// ── Page Loading ──
-async function loadPage(page){
-  const mc=document.getElementById('mainContent');
-  const html=await(await fetch('/page/'+page)).text();
-  mc.innerHTML=html;
-  Object.values(chartInstances||{}).forEach(c=>c.destroy?.());
-  chartInstances={};
-  if(page==='dashboard'){initDashboard();refreshTimer=setInterval(refreshDashboard,5000);}
-  if(page==='strategy_op')initStrategyOp();
-  if(page==='monitor'){initMonitor();refreshTimer=setInterval(refreshMonitor,8000);}
-  if(page==='analysis')initAnalysis();
-  if(page==='logs')initLogs();
-  if(page==='settings')initSettings();
-}
-
-// ── Clock ──
-function updateClock(){
-  document.getElementById('liveTime').textContent=new Date().toLocaleString('zh-CN');
-}
-setInterval(updateClock,1000);updateClock();
-
-// ── Bot Status ──
-async function updateBotStatus(){
-  const d=await api('/status');
-  const el=document.getElementById('botStatus');
-  if(el){el.className='badge '+(d.running?'on':'off');el.textContent=d.running?'在线':'离线';}
-}
-setInterval(updateBotStatus,10000);updateBotStatus();
-
-// ── Legacy Management Password Modal ──
-function showPwdModal(callback){
-  pwdCallback=callback;
-  document.getElementById('pwdModal').classList.add('show');
-  document.getElementById('pwdInput').value='';
-  document.getElementById('pwdError').style.display='none';
-  setTimeout(()=>document.getElementById('pwdInput').focus(),100);
-}
-function cancelPwd(){
-  document.getElementById('pwdModal').classList.remove('show');
-  pwdCallback=null;
-}
-async function confirmPwd(){
-  const pwd=document.getElementById('pwdInput').value;
-  const r=await api('/verify-password',{method:'POST',body:JSON.stringify({password:pwd})});
-  if(r.ok){
-    document.getElementById('pwdModal').classList.remove('show');
-    if(pwdCallback){pwdCallback();pwdCallback=null;}
-  }else{
-    document.getElementById('pwdError').style.display='block';
-  }
-}
-
-// ── Init ──
-loadProfileUI();
-navigate('dashboard');
-</script>
 </body>
-</html>
-"""
+</html>"""
 
 # ============================================================
 #   页面片段
@@ -1539,459 +2081,7 @@ PAGE_STRATEGY_OP = """
 	    document.getElementById('strategyPwdStatus').innerHTML = '<span style="color:var(--text);">⚠️ 未设置策略密码（任何人都可修改策略）</span>';
 	  }
 	}
-	
-let chartInstances={};
-let refreshTimer=null;
-let strategyList=[];
-let pwdCallback=null;
-
-function setText(id,val){const el=document.getElementById(id);if(el)el.textContent=val;}
-
-async function initDashboard(){
-  const keys=await api('/apikeys');
-  if(!keys.configured){
-    document.getElementById('mainContent').innerHTML='<div class="card" style="text-align:center;padding:60px 20px"><h3 style="color:var(--orange);margin-bottom:16px">请先配置币安 API 密钥</h3><p style="color:var(--text);margin-bottom:24px">您还没有配置币安 API Key 和 Secret Key，<br>无法连接交易所查看行情和交易。</p><button class="btn btn-primary" onclick="navigate('settings')">前往设置</button></div>';
-    return;
-  }
-  refreshDashboard();loadHistoryPositions();
-}
-
-
-async function refreshDashboard(){
-  const d=await api('/dashboard');
-  // 更新连接状态
-  const bs=document.getElementById('botStatus');
-  if (d.offline) {
-    bs.className='badge off'; bs.textContent='⚠ 币安离线(需VPN)';
-  }
-  const set=(id,v,cls)=>{const el=document.getElementById(id);if(el){el.textContent=v;if(cls)el.className=cls;}};
-  set('dashBalance',(d.balance||0).toFixed(2)+' USDT');
-  set('dashPnl',(d.unrealizedPnl||0).toFixed(2)+' USDT','value '+(d.unrealizedPnl>=0?'green':'red'));
-  set('dashTodayPnl',(d.todayPnl||0).toFixed(2)+' USDT','value '+(d.todayPnl>=0?'green':'red'));
-  set('dashPosCount',d.positionCount||0);
-  set('dashTradeCount',d.todayTrades||0);
-
-  // 下次资金费率结算倒计时
-  if(d.nextFunding){
-    const cd=document.getElementById('dashFundingCD');
-    if(cd){
-      const secs=d.nextFunding.seconds_left||0;
-      const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60), s=secs%60;
-      cd.textContent=h+'时'+m+'分'+s+'秒';
-      cd.style.color=secs<1800?'var(--orange)':'var(--title)';
-    }
-    setText('dashFeeRate',(d.feeInfo?.takerPct||0.04).toFixed(3)+'% taker');
-    setText('dashFeeRateVal',(d.feeInfo?.takerPct||0.04).toFixed(3)+'%');
-  }
-
-  // 当前持仓表格
-  const ct=document.getElementById('currentPositions');
-  if(ct && d.positions){
-    if(d.positions.length===0){
-      ct.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--text)">暂无持仓</td></tr>';
-    }else{
-      ct.innerHTML=d.positions.map(p=>{
-        const side=p.side==='LONG'?'多头':'空头';
-        const sideColor=p.side==='LONG'?'var(--green)':'var(--red)';
-        const pnl=(p.unrealizedPnl||0);
-        const pnlColor=pnl>=0?'var(--green)':'var(--red)';
-        const fr=(p.fundingRate||0);
-        const frColor=fr>0?'var(--green)':(fr<0?'var(--red)':'var(--text)');
-        return `<tr>
-          <td>${(p.symbol||'').replace(':USDT','')}</td>
-          <td style="color:${sideColor};font-weight:bold">${side}</td>
-          <td>${(p.entryPrice||0).toFixed(4)}</td>
-          <td>${(p.markPrice||0).toFixed(4)}</td>
-          <td style="color:var(--red)">${(p.liquidationPrice||0).toFixed(4)}</td>
-          <td>${p.leverage||0}x</td>
-          <td>${p.marginMode||'--'}</td>
-          <td>${p.contracts||0}</td>
-          <td style="color:${frColor};font-size:11px" title="${p.fundingLabel||''}">${fr>=0?'+':''}${fr.toFixed(4)}%</td>
-          <td style="font-size:11px">${(p.openFee||0).toFixed(4)}+${(p.closeFee||0).toFixed(4)}=<b>${(p.totalFee||0).toFixed(4)}U</b></td>
-          <td style="color:${pnlColor};font-weight:bold">${pnl>=0?'+':''}${pnl.toFixed(2)}U</td>
-        </tr>`;
-      }).join('');
-    }
-  }
-
-  // 自选币种
-  const wg=document.getElementById('watchGrid');
-  if(wg && d.watchlist){
-    wg.innerHTML=d.watchlist.map(w=>{
-      const ch=w.change||0;
-      const cc=ch>=0?'green':'red';
-      return `<div class="watch-card">
-        <span class="remove" onclick="removeWatch('${w.symbol}')" title="移除">×</span>
-        <div class="pair">${(w.symbol||'').replace(':USDT','')}</div>
-        <div class="price">${(w.price||0).toFixed(w.symbol?.startsWith('BTC')?2:4)}</div>
-        <div class="change ${cc}">${ch>=0?'+':''}${ch.toFixed(2)}%</div>
-      </div>`;
-    }).join('');
-  }
-
-  // 收益图 - 支持时间周期切换
-  async function loadEquity(period,btn){
-    document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
-    if(btn)btn.classList.add('active');
-    try{
-      const resp=await fetch('/api/equity?period='+period);
-      const d=await resp.json();
-      if(!d.labels||!d.labels.length)return;
-      const ctx=document.getElementById('profitChart')?.getContext('2d');
-      if(!ctx)return;
-      if(chartInstances.profit)chartInstances.profit.destroy();
-      const isUp=d.data[d.data.length-1]>=d.data[0];
-      chartInstances.profit=new Chart(ctx,{
-        type:'line',
-        data:{
-          labels:d.labels,
-          datasets:[{label:'权益曲线',data:d.data,borderColor:isUp?'#22c55e':'#ef4444',backgroundColor:isUp?'rgba(34,197,94,.08)':'rgba(239,68,68,.08)',fill:true,tension:.3,pointRadius:0}]
-        },
-        options:{
-          responsive:true,maintainAspectRatio:false,
-          interaction:{intersect:false,mode:'index'},
-          plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toFixed(2)}}},
-          scales:{x:{ticks:{color:'#555',font:{size:9},maxTicksLimit:12},grid:{color:'#1c2333'}},y:{ticks:{color:'#555',font:{size:9},callback:v=>'$'+v.toFixed(0)},grid:{color:'#1c2333'}}}
-        }
-      });
-    }catch(e){}
-  }
-
-  // 收益图（首次加载）
-  if(!chartInstances.profit)loadEquity('1D');
-
-  // 最近交易
-  const rt=document.getElementById('recentTrades');
-  if(rt && d.recentTrades){
-    const names={'long_entry':'做多','exit_long':'平多','short_entry':'做空','exit_short':'平空',
-      'flip_close_long':'翻转平多','flip_close_short':'翻转平空','exit_manual':'手动平仓',
-      '买入':'买入','卖出':'卖出','手动买入':'手动买入','手动卖出':'手动卖出'};
-    rt.innerHTML=d.recentTrades.map(t=>`<tr>
-      <td>${t.time||''}</td><td>${t.symbol||''}</td><td>${names[t.action]||t.action||'--'}</td>
-      <td>${t.contracts||''}</td><td>${t.price||''}</td><td>${t.usdt_value||''}U</td></tr>`).join('');
-  }
-}
-
-async function loadHistoryPositions(){
-  const d=await api('/history/positions');
-  setText('dashTotalRealPnl',(d.totalPnl||0).toFixed(2)+' USDT');
-  const el=document.getElementById('dashTotalRealPnl');
-  if(el)el.className='value '+(d.totalPnl>=0?'green':'red');
-  setText('histTotal',d.totalClosed||0);
-  setText('histTotalPnl',(d.totalPnl||0).toFixed(2));
-  setText('histWinRate',(d.winRate||0).toFixed(1)+'%');
-  const ht=document.getElementById('historyPositions');
-  if(ht && d.positions){
-    if(d.positions.length===0){
-      ht.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text)">暂无交易记录</td></tr>';
-    }else{
-      ht.innerHTML=d.positions.map(p=>{
-        const pnl=p.realizedPnl||0;
-        const pnlColor=pnl>=0?'var(--green)':'var(--red)';
-        const actionColor=p.action?.includes('平')||p.action?.includes('卖')?'var(--orange)':(p.action?.includes('买')?'var(--green)':'var(--text)');
-        const isManual=p.isManual?' (手动)':'';
-        return `<tr>
-          <td>${p.entryTime||p.exitTime||''}</td>
-          <td>${(p.symbol||'').replace(':USDT','')}</td>
-          <td style="color:${actionColor}">${p.action||(p.side==='LONG'?'多头':'空头')}${isManual}</td>
-          <td>${(p.price||p.entryPrice||0).toFixed(4)}</td>
-          <td>${p.contracts||0}</td>
-          <td>${(p.usdtValue||0).toFixed(2)}U</td>
-          <td style="color:${pnlColor};font-weight:bold">${pnl>0?'+':''}${pnl.toFixed(2)}U</td>
-        </tr>`;
-      }).join('');
-    }
-  }
-}
-
-async function initMonitor(){await refreshMonitor();document.getElementById('monSymbol')?.addEventListener('change',refreshMonitor);}
-
-async function refreshMonitor(){
-  const symbol=document.getElementById('monSymbol')?.value||'ETHUSDT';
-  const d=await api('/klines/'+symbol+'?limit=200');
-  const ctx=document.getElementById('klineChart')?.getContext('2d');
-  if(!ctx||!d.klines)return;
-  if(chartInstances.kline)chartInstances.kline.destroy();
-  const labels=d.klines.map(k=>new Date(k[0]).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
-  const closes=d.klines.map(k=>k[4]);
-  chartInstances.kline=new Chart(ctx,{
-    type:'line',
-    data:{
-      labels,
-      datasets:[
-        {label:'价格',data:closes,borderColor:'#3b82f6',pointRadius:0,tension:.1,borderWidth:1.5},
-        {label:'MA5',data:d.ma5,borderColor:'#f59e0b',pointRadius:0,borderWidth:1,spanGaps:true},
-        {label:'MA10',data:d.ma10,borderColor:'#ef4444',pointRadius:0,borderWidth:1,spanGaps:true},
-        {label:'MA20',data:d.ma20,borderColor:'#8b5cf6',pointRadius:0,borderWidth:1,spanGaps:true},
-      ]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#9599a3',font:{size:10}}}},
-      scales:{x:{ticks:{color:'#555',font:{size:9}},grid:{color:'#1c2333'}},y:{ticks:{color:'#555',font:{size:9}},grid:{color:'#1c2333'}}}
-    }
-  });
-  const last=closes[closes.length-1]||0;
-  setText('monPrice',last.toFixed(2));
-  setText('monVolume',(d.klines[d.klines.length-1]?.[5]||0).toFixed(1));
-
-  // 行情表
-  const mkts=await api('/market/overview');
-  const tb=document.getElementById('marketTable');
-  if(tb){
-    tb.innerHTML=mkts.slice(0,30).map((m,i)=>`<tr><td>${i+1}</td><td>${(m.symbol||'').replace(':USDT','')}</td><td>${(m.price||0).toFixed(4)}</td><td class="${(m.change||0)>=0?'green':'red'}">${(m.change||0)>=0?'+':''}${(m.change||0).toFixed(2)}%</td></tr>`).join('');
-  }
-}
-
-async function initAnalysis(){
-  const d=await api('/analysis');
-  setText('anaWinRate',(d.winRate||0).toFixed(1)+'%');
-  setText('anaPnLRatio',d.pnlRatio||'--');
-  setText('anaTotalTrades',d.totalTrades||0);
-  setText('anaBestTrade',(d.bestTrade||0).toFixed(2)+'U');
-  const ctx1=document.getElementById('winRateChart')?.getContext('2d');
-  if(ctx1){
-    chartInstances.winRate=new Chart(ctx1,{type:'doughnut',data:{labels:['盈利','亏损'],datasets:[{data:[d.winRate||0,100-(d.winRate||0)],backgroundColor:['#22c55e','#ef4444']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#9599a3',font:{size:10}}}}}});
-  }
-  const ctx2=document.getElementById('pairChart')?.getContext('2d');
-  if(ctx2&&d.pairStats){
-    chartInstances.pair=new Chart(ctx2,{type:'bar',data:{labels:d.pairStats.map(p=>p.name),datasets:[{data:d.pairStats.map(p=>p.count),backgroundColor:'#3b82f6',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#555'},grid:{color:'#1c2333'}},y:{ticks:{color:'#555'},grid:{display:false}}}}});
-  }
-}
-
-async function initLogs(){await loadLogLines();document.getElementById('logLevel')?.addEventListener('change',loadLogLines);}
-
-async function initSettings(){
-  const apis=await api('/apikeys');
-  const ak=document.getElementById('set_api_key');if(ak)ak.value=apis.apiKey||'';
-  const sk=document.getElementById('set_secret_key');if(sk)sk.value=apis.secretKey||'';
-  const px=document.getElementById('set_proxy_url');if(px)px.value=apis.proxyUrl||'';
-}
-let pwdCallback=null;
-
-async function saveApiKeys(){
-  const ak=document.getElementById('set_api_key')?.value||'';
-  const sk=document.getElementById('set_secret_key')?.value||'';
-  const px=document.getElementById('set_proxy_url')?.value||'';
-  const r=await api('/apikeys/save',{method:'POST',body:JSON.stringify({apiKey:ak,secretKey:sk,proxyUrl:px})});
-  if(r.ok){alert('API Key 已保存，2秒后自动刷新');setTimeout(()=>location.reload(),2000);}else{alert('保存失败');}
-}
-
-(async function(){
-  const a=await api('/avatar');
-  if(a.data){document.getElementById('avatarImg').src=a.data;}
-})();
-loadPage('dashboard');
-
-async function toggleBot(start){
-  await api(start?'/bot/start':'/bot/stop',{method:'POST',body:'{}'});
-  setTimeout(initStrategy,1500);
-}
-
-async function initStrategyOp(){
-  // ── 策略密码验证 ──
-  const pwdCheck = await api('/strategy-password/status');
-  if (pwdCheck.hasPassword) {
-    const pwd = prompt('此策略页面已设置密码保护，请输入策略密码：');
-    if (!pwd) {
-      navigate('dashboard');
-      alert('已取消，返回仪表盘');
-      return;
-    }
-    const verify = await api('/strategy-password/verify', {
-      method: 'POST',
-      body: JSON.stringify({password: pwd})
-    });
-    if (!verify.ok) {
-      alert('策略密码错误！');
-      navigate('dashboard');
-      return;
-    }
-  }
-  // 加载策略状态
-  const d=await api('/status');
-  const cfg=await api('/config');
-  setText('stratStatus',d.running?'运行中':'已停止');
-  const sel=document.getElementById('stratStatus');
-  if(sel){sel.className='badge '+(d.running?'on':'off');}
-  setText('stratBtn',d.running?'停止策略':'启动策略');
-  const btn=document.getElementById('stratBtn');
-  if(btn)btn.onclick=()=>toggleBot(!d.running);
-  const actDelay=parseInt(cfg.ACTIVATION_DELAY_MINUTES||'0');
-  setText('stratActDelay',actDelay>0?actDelay+' 分钟':'立即启动');
-  const stype=cfg.STRATEGY_TYPE||'TEMA';
-  if(stype==='VOLTY'){
-    setText('stratName','Volty Expan Close Strategy');
-    setText('stratTypeLabel','波动性突破（ATR通道）');
-    setText('stratLogic','ATR通道突破，Bar收盘确认，每根K线更新入场价');
-  }else{
-    setText('stratName','OCC Strategy v8.13');
-    setText('stratTypeLabel','趋势跟随（TEMA 跨周期）');
-    setText('stratLogic','跨周期均线交叉 + 延迟确认');
-  }
-  const fields={stratSymbols:cfg.SYMBOLS,stratTF:cfg.TIMEFRAME_MINUTES+'分钟',stratMA:cfg.MA_TYPE+'('+cfg.MA_LEN+')',stratCross:cfg.CROSS_MULT+'x',stratDelay:cfg.DELAY_MINUTES+'分钟',stratPct:cfg.POSITION_PCT+'%',stratLev:cfg.LEVERAGE+'x',stratSL:cfg.STOP_LOSS_PCT+'%',stratType:cfg.TRADE_TYPE,stratVoltyLen:cfg.VOLTY_LENGTH||'5',stratVoltyMult:(cfg.VOLTY_ATR_MULT||'0.75')+'x'};
-  for(const[id,val]of Object.entries(fields))setText(id,val);
-  const showTema=stype!=='VOLTY';
-  const showVolty=stype==='VOLTY';
-  document.getElementById('stratRowMA').style.display=showTema?'':'none';
-  document.getElementById('stratRowCross').style.display=showTema?'':'none';
-  document.getElementById('stratRowVoltyLen').style.display=showVolty?'':'none';
-  document.getElementById('stratRowVoltyMult').style.display=showVolty?'':'none';
-  // 加载策略配置列表
-  loadStrategyList();
-}
-
-async function saveStrategyConfig(){
-  const idx=document.getElementById('cfgEditId').value;
-  const cfg={
-    symbol:document.getElementById('cfgSymbol').value,
-    strategyType:document.getElementById('cfgStrategyType').value,
-    timeframe:parseInt(document.getElementById('cfgTimeframe').value)||1,
-    maType:document.getElementById('cfgMAType').value,
-    maLen:parseInt(document.getElementById('cfgMALen').value)||8,
-    crossMult:parseInt(document.getElementById('cfgCrossMult').value)||3,
-    delayMin:parseInt(document.getElementById('cfgDelayMin').value)||5,
-    voltyLength:parseInt(document.getElementById('cfgVoltyLength').value)||5,
-    voltyAtrMult:parseFloat(document.getElementById('cfgVoltyAtrMult').value)||0.75,
-    positionPct:parseInt(document.getElementById('cfgPositionPct').value)||20,
-    leverage:parseInt(document.getElementById('cfgLeverage').value)||3,
-    marginMode:document.getElementById('cfgMarginMode').value,
-    stopLoss:parseFloat(document.getElementById('cfgStopLoss').value)||5,
-    tradeType:document.getElementById('cfgTradeType').value,
-    actDelay:parseInt(document.getElementById('cfgActDelay').value)||0,
-    maxOrder:parseFloat(document.getElementById('cfgMaxOrder').value)||0,
-    minOrder:parseFloat(document.getElementById('cfgMinOrder').value)||11,
-  };
-  if(idx!==''){
-    strategyList[parseInt(idx)]=cfg;
-  }else{
-    // 检查重复
-    const dupIdx=strategyList.findIndex(s=>s.symbol===cfg.symbol);
-    if(dupIdx>=0)strategyList[dupIdx]=cfg;
-    else strategyList.push(cfg);
-  }
-  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
-  resetStrategyForm();
-  renderStrategyTable();
-  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
-  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
-  setTimeout(initStrategyOp,4000);
-  alert('策略配置已保存，正在重启机器人...');
-}
-
-async function deleteStrategy(idx){
-  if(!confirm('删除策略 '+strategyList[idx]?.symbol+' 的配置？'))return;
-  strategyList.splice(idx,1);
-  await api('/strategies/save',{method:'POST',body:JSON.stringify({strategies:strategyList})});
-  renderStrategyTable();
-  try{await api('/bot/stop',{method:'POST',body:'{}'});}catch(e){}
-  setTimeout(async()=>{try{await api('/bot/start',{method:'POST',body:'{}'});}catch(e){}},2000);
-}
-
-function resetStrategyForm(){
-  document.getElementById('cfgEditId').value='';
-  document.getElementById('cfgSymbol').value='ETHUSDT';
-  document.getElementById('cfgStrategyType').value='TEMA';
-  document.getElementById('cfgTimeframe').value='1';
-  document.getElementById('cfgMAType').value='TEMA';
-  document.getElementById('cfgMALen').value='8';
-  document.getElementById('cfgCrossMult').value='3';
-  document.getElementById('cfgDelayMin').value='5';
-  document.getElementById('cfgVoltyLength').value='5';
-  document.getElementById('cfgVoltyAtrMult').value='0.75';
-  document.getElementById('cfgPositionPct').value='20';
-  document.getElementById('cfgLeverage').value='3';
-  document.getElementById('cfgLevLabel').textContent='3x';
-  document.getElementById('cfgStopLoss').value='5';
-  document.getElementById('cfgTradeType').value='BOTH';
-  document.getElementById('cfgActDelay').value='0';
-  document.getElementById('cfgMaxOrder').value='0';
-  document.getElementById('cfgMinOrder').value='11';
-  toggleCfgStrategyFields();
-}
-
-function renderStrategyTable(){
-  const tb=document.getElementById('strategyTableBody');
-  if(!tb)return;
-  if(strategyList.length===0){
-    tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text)">暂无策略配置，请添加</td></tr>';
-  }else{
-    tb.innerHTML=strategyList.map((s,i)=>{
-      const stype=s.strategyType||'TEMA';
-      const stypeLabel=stype==='VOLTY'?'Volty':'TEMA';
-      const params=stype==='VOLTY'?`ATR${s.voltyLength||5}x${s.voltyAtrMult||0.75}`:`${s.maType||'TEMA'}(${s.maLen||8}) ${s.crossMult||3}x`;
-      return `<tr>
-      <td style="color:var(--title);font-weight:bold">${s.symbol||''}</td>
-      <td><span class="tag ${stype==='VOLTY'?'tag-warn':'tag-info'}">${stypeLabel}</span></td>
-      <td>${s.timeframe||1}分钟</td>
-      <td>${params}</td>
-      <td>${s.positionPct||20}%</td>
-      <td>${s.leverage||3}x</td>
-      <td>${s.marginMode==='cross'?'全仓':'逐仓'}</td>
-      <td>${s.maxOrder>0?s.maxOrder+'U':'默认'}</td>
-      <td>${s.stopLoss||5}%</td>
-      <td>
-        <button class="btn btn-outline btn-sm" onclick="editStrategy(${i})">编辑</button>
-        <button class="btn btn-red btn-sm" style="margin-left:4px" onclick="deleteStrategy(${i})">✕</button>
-      </td>
-    </tr>`}).join('');
-  }
-}
-
-function editStrategy(idx){
-  const s=strategyList[idx];
-  if(!s)return;
-  document.getElementById('cfgEditId').value=idx;
-  document.getElementById('cfgSymbol').value=s.symbol||'ETHUSDT';
-  document.getElementById('cfgStrategyType').value=s.strategyType||'TEMA';
-  document.getElementById('cfgTimeframe').value=s.timeframe||'1';
-  document.getElementById('cfgMAType').value=s.maType||'TEMA';
-  document.getElementById('cfgMALen').value=s.maLen||'8';
-  document.getElementById('cfgCrossMult').value=s.crossMult||'3';
-  document.getElementById('cfgDelayMin').value=s.delayMin||'5';
-  document.getElementById('cfgVoltyLength').value=s.voltyLength||'5';
-  document.getElementById('cfgVoltyAtrMult').value=s.voltyAtrMult||'0.75';
-  document.getElementById('cfgPositionPct').value=s.positionPct||'20';
-  document.getElementById('cfgLeverage').value=s.leverage||'3';
-  document.getElementById('cfgLevLabel').textContent=(s.leverage||'3')+'x';
-  document.getElementById('cfgMarginMode').value=s.marginMode||'isolated';
-  document.getElementById('cfgStopLoss').value=s.stopLoss||'5';
-  document.getElementById('cfgTradeType').value=s.tradeType||'BOTH';
-  document.getElementById('cfgActDelay').value=s.actDelay||'0';
-  document.getElementById('cfgMaxOrder').value=s.maxOrder||'0';
-  document.getElementById('cfgMinOrder').value=s.minOrder||'11';
-  toggleCfgStrategyFields();
-}
-
-function cancelPwd(){
-  document.getElementById('pwdModal').classList.remove('show');
-  pwdCallback=null;
-}
-
-async function confirmPwd(){
-  const pwd=document.getElementById('pwdInput').value;
-  const r=await api('/verify-password',{method:'POST',body:JSON.stringify({password:pwd})});
-  if(r.ok){
-    document.getElementById('pwdModal').classList.remove('show');
-    if(pwdCallback){pwdCallback();pwdCallback=null;}
-  }else{
-    document.getElementById('pwdError').style.display='block';
-  }
-}
-
-async function addWatch(){
-  const inp=document.getElementById('watchInput');
-  const sym=(inp.value||'').toUpperCase().trim();
-  if(!sym){alert('输入币种');return;}
-  await api('/watchlist/add',{method:'POST',body:JSON.stringify({symbol:sym})});
-  inp.value='';
-  refreshDashboard();
-}
-
-async function removeWatch(sym){
-  await api('/watchlist/remove',{method:'POST',body:JSON.stringify({symbol:sym})});
-  refreshDashboard();
-}</script>
+	</script>
 """
 PAGE_MONITOR = """
 <div class="stat-cards">
@@ -2610,22 +2700,24 @@ def _handle_api(path, body=None, qs=""):
 
     if path == "/api/profile/save" and body:
         data = _parse_json(body)
-        profile = load_profile(username) if username else {}
-        if "nickname" in data:
-            profile["nickname"] = data["nickname"][:20]
-        save_profile(username, profile)
+        if username:
+            profile = load_profile(username)
+            if "nickname" in data:
+                profile["nickname"] = data["nickname"][:20]
+            save_profile(username, profile)
         return {"ok": True}
 
     if path == "/api/avatar/upload" and body:
-        img_data = data.get("image", "") if (data := _parse_json(body)) else ""
+        data = _parse_json(body)
+        img_data = data.get("image", "")
         if img_data and username:
-            import re
+            import re as _re
             img_bytes = None
             if img_data.startswith("data:image/jpeg"):
-                img_bytes = base64.b64decode(re.sub(r"^data:image/jpeg;base64,", "", img_data))
+                img_bytes = base64.b64decode(_re.sub(r"^data:image/jpeg;base64,", "", img_data))
                 ext = "jpg"
             elif img_data.startswith("data:image/png"):
-                img_bytes = base64.b64decode(re.sub(r"^data:image/png;base64,", "", img_data))
+                img_bytes = base64.b64decode(_re.sub(r"^data:image/png;base64,", "", img_data))
                 ext = "png"
             if img_bytes:
                 ua = _user_file(username, f"avatar.{ext}")
@@ -2699,7 +2791,6 @@ def _handle_api(path, body=None, qs=""):
         return {"ok": True}
 
     if path == "/api/avatar":
-        # 优先返回用户头像
         if username:
             for ext in ["jpg", "png"]:
                 ua = _user_file(username, f"avatar.{ext}")
