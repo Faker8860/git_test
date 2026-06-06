@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 from db import (
     register_user, login_user, get_user_by_token, logout_user,
     get_user_dir, ensure_user_dir, init_preset_accounts,
-    reset_password, hash_password as db_hash_password,
+    reset_password, update_profile, hash_password as db_hash_password,
 )
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -1242,8 +1242,12 @@ async function doLogout(){
 (async function(){
   const me=await api('/auth/me');
   if(me.user){
-    document.getElementById('usernameDisplay').textContent=me.user.username;
+    const dn=me.user.displayName||me.user.username;
+    document.getElementById('usernameDisplay').textContent=dn;
+    const sd=document.getElementById('sidebarDisplayName');
+    if(sd)sd.textContent=dn;
     localStorage.setItem('username',me.user.username);
+    localStorage.setItem('displayName',me.user.displayName||'');
   }
 })();
 
@@ -1755,6 +1759,86 @@ async function initSettings(){
   const ak=document.getElementById('set_api_key');if(ak)ak.value=apis.apiKey||'';
   const sk=document.getElementById('set_secret_key');if(sk)sk.value=apis.secretKey||'';
   const px=document.getElementById('set_proxy_url');if(px)px.value=apis.proxyUrl||'';
+  loadProfile();
+}
+async function loadProfile(){
+  const p=await api('/profile');
+  if(p.error)return;
+  const ni=document.getElementById('profileNickname');
+  if(ni)ni.value=p.displayName||'';
+  if(p.avatar){
+    document.getElementById('profileAvatar').src=p.avatar;
+    document.getElementById('avatarImg').src=p.avatar;
+  }
+}
+function previewAvatar(){
+  const file=document.getElementById('avatarFileInput').files[0];
+  if(!file)return;
+  if(file.size>2*1024*1024){alert('图片不能超过2MB');return;}
+  const reader=new FileReader();
+  reader.onload=function(e){
+    document.getElementById('profileAvatar').src=e.target.result;
+    document.getElementById('avatarUploadBtn').style.display='inline-block';
+  };
+  reader.readAsDataURL(file);
+}
+async function uploadAvatar(){
+  const img=document.getElementById('profileAvatar').src;
+  if(!img||!img.startsWith('data:image/')){alert('请先选择图片');return;}
+  const r=await api('/avatar/upload',{method:'POST',body:JSON.stringify({data:img})});
+  if(r.ok){
+    document.getElementById('avatarImg').src=img;
+    document.getElementById('avatarUploadBtn').style.display='none';
+    showProfileMsg('头像已更新','green');
+  }else{
+    showProfileMsg(r.error||'上传失败','red');
+  }
+}
+async function saveProfile(){
+  const nick=document.getElementById('profileNickname').value.trim();
+  const r=await api('/profile/update',{method:'POST',body:JSON.stringify({displayName:nick})});
+  if(r.ok){
+    const dn=nick||localStorage.getItem('username')||'';
+    document.getElementById('usernameDisplay').textContent=dn;
+    const sd=document.getElementById('sidebarDisplayName');
+    if(sd)sd.textContent=dn;
+    localStorage.setItem('displayName',nick);
+    showProfileMsg('昵称已保存','green');
+  }else{
+    showProfileMsg(r.error||'保存失败','red');
+  }
+}
+function showProfileMsg(msg,color){
+  const el=document.getElementById('profileMsg');
+  if(!el)return;
+  el.textContent=msg;el.style.color=color==='green'?'var(--green)':'var(--red)';
+  el.style.display='block';
+  setTimeout(function(){el.style.display='none'},3000);
+}
+async function changePassword(){
+  const oldPwd=document.getElementById('pwdOld').value;
+  const newPwd=document.getElementById('pwdNew').value;
+  const newPwd2=document.getElementById('pwdNew2').value;
+  const msgEl=document.getElementById('pwdMsg');
+  if(!oldPwd||!newPwd){showPwdMsg('请填写旧密码和新密码','red');return;}
+  if(newPwd.length<4){showPwdMsg('新密码至少4位','red');return;}
+  if(newPwd!==newPwd2){showPwdMsg('两次新密码不一致','red');return;}
+  const r=await api('/auth/reset-password',{method:'POST',body:JSON.stringify({oldPassword:oldPwd,newPassword:newPwd})});
+  if(r.ok){
+    showPwdMsg('密码修改成功','green');
+    document.getElementById('pwdOld').value='';
+    document.getElementById('pwdNew').value='';
+    document.getElementById('pwdNew2').value='';
+  }else{
+    showPwdMsg(r.error||'修改失败','red');
+  }
+}
+function showPwdMsg(msg,color){
+  const el=document.getElementById('pwdMsg');
+  if(!el)return;
+  el.textContent=msg;el.style.color=color==='green'?'var(--green)':'var(--red)';
+  el.style.display='block';
+  setTimeout(function(){el.style.display='none'},3000);
 }
 let pwdCallback=null;
 function showPwdModal(callback){
@@ -1787,7 +1871,8 @@ async function saveApiKeys(){
 }
 
 (async function(){
-  const a=await api('/avatar');
+  const token=localStorage.getItem('token')||'';
+  const a=await api('/avatar'+(token?'?token='+encodeURIComponent(token):''));
   if(a.data){document.getElementById('avatarImg').src=a.data;}
 })();
 loadPage('dashboard');
@@ -2045,6 +2130,34 @@ PAGE_LOGS = """
 """
 
 PAGE_SETTINGS = """
+<div class="card" style="max-width:500px">
+  <h3>个人信息</h3>
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+    <img id="profileAvatar" src="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);background:var(--bg)">
+    <div style="flex:1">
+      <input type="file" id="avatarFileInput" accept="image/*" style="display:none" onchange="previewAvatar()">
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('avatarFileInput').click()">选择图片</button>
+      <button class="btn btn-primary btn-sm" id="avatarUploadBtn" onclick="uploadAvatar()" style="display:none;margin-left:4px">上传头像</button>
+      <p style="font-size:10px;color:var(--text);margin-top:4px">支持 JPG/PNG，不超过 2MB</p>
+    </div>
+  </div>
+  <label>昵称</label>
+  <div class="inline-input">
+    <input type="text" id="profileNickname" placeholder="输入昵称（留空则显示账户名）" maxlength="50">
+    <button class="btn btn-primary" onclick="saveProfile()">保存</button>
+  </div>
+  <p id="profileMsg" style="font-size:11px;margin-top:8px;display:none"></p>
+</div>
+
+<div class="card" style="max-width:500px">
+  <h3>修改密码</h3>
+  <label>旧密码</label><input type="password" id="pwdOld" placeholder="输入当前密码">
+  <label>新密码</label><input type="password" id="pwdNew" placeholder="输入新密码（至少4位）">
+  <label>确认新密码</label><input type="password" id="pwdNew2" placeholder="再次输入新密码">
+  <button class="btn btn-primary" onclick="changePassword()">修改密码</button>
+  <p id="pwdMsg" style="font-size:11px;margin-top:8px;display:none"></p>
+</div>
+
 <div class="card" style="max-width:500px">
   <h3>API 配置</h3>
   <label>API Key</label><input type="password" id="set_api_key" placeholder="币安 API Key">
@@ -2686,13 +2799,91 @@ def _handle_api(path, body=None, qs=""):
         return {"ok": True}
 
     if path == "/api/avatar":
-        avatar_path = BASE_DIR / "交易头像.jpg"
+        # 支持用户专属头像：有 token 则读用户头像，否则回退到默认头像
+        token = _extract_token(qs)
+        user = get_user_by_token(token) if token else None
+        if user:
+            avatar_path = get_user_dir(user["username"]) / "avatar.jpg"
+        else:
+            avatar_path = BASE_DIR / "交易头像.jpg"
         try:
             with open(avatar_path, "rb") as f:
                 img = base64.b64encode(f.read()).decode()
             return {"data": f"data:image/jpeg;base64,{img}"}
         except Exception:
+            # 用户头像不存在时回退到默认
+            if user:
+                try:
+                    default_path = BASE_DIR / "交易头像.jpg"
+                    with open(default_path, "rb") as f:
+                        img = base64.b64encode(f.read()).decode()
+                    return {"data": f"data:image/jpeg;base64,{img}"}
+                except Exception:
+                    return {"data": ""}
             return {"data": ""}
+
+    if path == "/api/avatar/upload" and body:
+        # 需要登录
+        token = _extract_token(qs, body)
+        upload_user = get_user_by_token(token) if token else None
+        if not upload_user:
+            return {"error": "unauthorized", "code": 401}
+        data = _parse_json(body)
+        img_data = data.get("data", "")
+        if not img_data or not img_data.startswith("data:image/"):
+            return {"ok": False, "error": "无效的图片数据"}
+        try:
+            header, encoded = img_data.split(",", 1)
+            img_bytes = base64.b64decode(encoded)
+            if len(img_bytes) > 2 * 1024 * 1024:
+                return {"ok": False, "error": "图片不能超过2MB"}
+            avatar_path = get_user_dir(upload_user["username"]) / "avatar.jpg"
+            with open(avatar_path, "wb") as f:
+                f.write(img_bytes)
+            return {"ok": True, "data": img_data}
+        except Exception as e:
+            return {"ok": False, "error": f"保存失败: {e}"}
+
+    if path == "/api/profile":
+        # 需要登录
+        token = _extract_token(qs, body)
+        profile_user = get_user_by_token(token) if token else None
+        if not profile_user:
+            return {"error": "unauthorized", "code": 401}
+        display_name = ""
+        avatar_data = ""
+        conn = None
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(BASE_DIR / "accounts.db"))
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT display_name FROM users WHERE username = ?",
+                (profile_user["username"],)
+            ).fetchone()
+            if row:
+                display_name = row["display_name"] or ""
+        except Exception:
+            pass
+        finally:
+            if conn:
+                conn.close()
+        avatar_path = get_user_dir(profile_user["username"]) / "avatar.jpg"
+        try:
+            with open(avatar_path, "rb") as f:
+                avatar_data = f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode()}"
+        except Exception:
+            pass
+        return {"displayName": display_name, "avatar": avatar_data}
+
+    if path == "/api/profile/update" and body:
+        token = _extract_token(qs, body)
+        profile_user = get_user_by_token(token) if token else None
+        if not profile_user:
+            return {"error": "unauthorized", "code": 401}
+        data = _parse_json(body)
+        result = update_profile(profile_user["username"], data.get("displayName", ""))
+        return result
 
     if path == "/api/verify-password" and body:
         data = _parse_json(body)

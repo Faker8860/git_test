@@ -35,6 +35,7 @@ def _init_tables(conn):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            display_name TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now','localtime'))
         );
 
@@ -46,6 +47,11 @@ def _init_tables(conn):
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
     """)
+    # 兼容已有数据库：如果 display_name 列不存在则添加
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
 
 
 # Token 有效期（天）
@@ -121,7 +127,7 @@ def register_user(username: str, password: str) -> dict:
         user_dir = USER_DATA_ROOT / username
         user_dir.mkdir(parents=True, exist_ok=True)
 
-        return {"ok": True, "user": {"id": user_id, "username": username}}
+        return {"ok": True, "user": {"id": user_id, "username": username, "displayName": ""}}
     except sqlite3.IntegrityError:
         return {"ok": False, "error": "用户名已存在"}
     finally:
@@ -134,7 +140,7 @@ def login_user(username: str, password: str) -> dict:
     conn = get_db()
     try:
         user = conn.execute(
-            "SELECT id, username, password_hash FROM users WHERE username = ?",
+            "SELECT id, username, display_name, password_hash FROM users WHERE username = ?",
             (username,)
         ).fetchone()
 
@@ -160,7 +166,8 @@ def login_user(username: str, password: str) -> dict:
         return {
             "ok": True,
             "token": token,
-            "user": {"id": user["id"], "username": user["username"]}
+            "user": {"id": user["id"], "username": user["username"],
+                     "displayName": user["display_name"] or ""}
         }
     finally:
         conn.close()
@@ -175,12 +182,13 @@ def get_user_by_token(token: str) -> dict | None:
         # 先清理过期会话
         conn.execute("DELETE FROM sessions WHERE expires_at < datetime('now','localtime')")
         row = conn.execute("""
-            SELECT u.id, u.username FROM users u
+            SELECT u.id, u.username, u.display_name FROM users u
             JOIN sessions s ON u.id = s.user_id
             WHERE s.token = ? AND (s.expires_at IS NULL OR s.expires_at > datetime('now','localtime'))
         """, (token,)).fetchone()
         if row:
-            return {"id": row["id"], "username": row["username"]}
+            return {"id": row["id"], "username": row["username"],
+                    "displayName": row["display_name"] or ""}
         return None
     finally:
         conn.close()
@@ -220,6 +228,24 @@ def reset_password(username: str, old_password: str, new_password: str) -> dict:
         )
         conn.commit()
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+def update_profile(username: str, display_name: str) -> dict:
+    """更新用户昵称."""
+    username = username.strip()
+    display_name = (display_name or "").strip()
+    if len(display_name) > 50:
+        return {"ok": False, "error": "昵称不能超过50个字符"}
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE users SET display_name = ? WHERE username = ?",
+            (display_name, username)
+        )
+        conn.commit()
+        return {"ok": True, "displayName": display_name}
     finally:
         conn.close()
 
