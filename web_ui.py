@@ -1027,6 +1027,8 @@ HTML_USER = r"""<!DOCTYPE html>
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; overflow:hidden; }
+.sidebar-profile { display:flex;align-items:center;gap:10px;padding:12px 16px 16px;border-bottom:1px solid var(--border);margin-bottom:8px; }
+.sidebar-profile-info { display:flex;flex-direction:column;min-width:0; }
 .sidebar { width:200px; min-width:200px; background:var(--sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:16px 0; }
 .sidebar .logo { padding:0 20px 20px; font-size:16px; font-weight:bold; color:var(--title); border-bottom:1px solid var(--border); margin-bottom:8px; }
 .sidebar .logo span { font-size:11px; color:var(--green); display:block; margin-top:2px; }
@@ -1145,9 +1147,12 @@ label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; mar
 <body>
 
 <nav class="sidebar">
-  <div class="logo" style="display:flex;align-items:center;gap:8px">
-    <img id="avatarImg" src="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--accent)">
-    <div>量化交易<span>交易员测试</span></div>
+  <div class="sidebar-profile">
+    <img id="avatarImg" src="" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);cursor:pointer" onclick="navigate('settings')" title="点击修改个人信息">
+    <div class="sidebar-profile-info">
+      <span id="sidebarDisplayName" style="font-size:14px;font-weight:bold;color:var(--title)">量化交易<span>交易员测试</span></span>
+      <span id="sidebarAccount" style="font-size:11px;color:var(--text);display:block"></span>
+    </div>
   </div>
   <a href="#dashboard" class="active" data-page="dashboard"><span class="icon">📋</span> 仪表盘</a>
   <a href="#strategy_op" data-page="strategy_op"><span class="icon">🎯</span> 策略配置</a>
@@ -1163,8 +1168,6 @@ label { display:block; font-size:12px; color:var(--text); margin-bottom:4px; mar
     <button class="hamburger" onclick="toggleSidebar()" title="菜单">☰</button>
     <h2 id="pageTitle">仪表盘</h2>
     <div class="right">
-      <span id="usernameDisplay" style="color:var(--green);margin-right:12px;font-size:12px;"></span>
-      <button onclick="doLogout()" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;margin-right:8px;">退出</button>
       <span id="liveTime">--</span>
       <span id="botStatus" class="badge off">● 离线</span>
     </div>
@@ -1243,9 +1246,10 @@ async function doLogout(){
   const me=await api('/auth/me');
   if(me.user){
     const dn=me.user.displayName||me.user.username;
-    document.getElementById('usernameDisplay').textContent=dn;
-    const sd=document.getElementById('sidebarDisplayName');
+const sd=document.getElementById('sidebarDisplayName');
     if(sd)sd.textContent=dn;
+    const sa=document.getElementById('sidebarAccount');
+    if(sa)sa.textContent='@'+me.user.username;
     localStorage.setItem('username',me.user.username);
     localStorage.setItem('displayName',me.user.displayName||'');
   }
@@ -1799,9 +1803,10 @@ async function saveProfile(){
   const r=await api('/profile/update',{method:'POST',body:JSON.stringify({displayName:nick})});
   if(r.ok){
     const dn=nick||localStorage.getItem('username')||'';
-    document.getElementById('usernameDisplay').textContent=dn;
-    const sd=document.getElementById('sidebarDisplayName');
-    if(sd)sd.textContent=dn;
+const sd=document.getElementById('sidebarDisplayName');
+    if(sd)sd.textContent=dn||localStorage.getItem('username')||'';
+    const sa=document.getElementById('sidebarAccount');
+    if(sa)sa.textContent='@'+localStorage.getItem('username');
     localStorage.setItem('displayName',nick);
     showProfileMsg('昵称已保存','green');
   }else{
@@ -2131,7 +2136,7 @@ PAGE_LOGS = """
 
 PAGE_SETTINGS = """
 <div class="card" style="max-width:500px">
-  <h3>个人信息</h3>
+  <div style="display:flex;justify-content:space-between;align-items:center"><h3>个人信息</h3><button class="btn btn-outline btn-sm" onclick="doLogout()">退出登录</button></div>
   <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
     <img id="profileAvatar" src="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);background:var(--bg)">
     <div style="flex:1">
