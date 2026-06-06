@@ -114,6 +114,7 @@ def _get_private_binance(username: str):
     if not api_key or not api_secret:
         _user_client_times[username] = now
         _user_private_clients[username] = None
+        print(f"[客户端] {username}: API密钥未配置，请在设置中心输入币安API Key")
         return None
 
     try:
@@ -126,11 +127,15 @@ def _get_private_binance(username: str):
         })
         if proxy_url:
             client.session.proxies.update({"http": proxy_url, "https": proxy_url})
+            print(f"[客户端] {username}: 已创建私有客户端，代理={proxy_url}")
+        else:
+            print(f"[客户端] {username}: 已创建私有客户端，无代理（在中国大陆可能无法连接）")
         if os.getenv("BINANCE_API_URL"):
             client.urls["api"] = os.getenv("BINANCE_API_URL")
         _user_private_clients[username] = client
-    except Exception:
+    except Exception as e:
         _user_private_clients[username] = None
+        print(f"[客户端] {username}: 创建客户端失败 - {e}")
 
     _user_client_times[username] = now
     return _user_private_clients[username]
@@ -512,21 +517,30 @@ def get_klines(symbol: str, timeframe: str = "1m", limit: int = 100):
 
 def get_account_balance(username=None):
     """获取合约账户余额."""
-    global _balance_cache, _balance_cache_time
+    global _balance_cache, _balance_cache_time, _binance_ok
     now = time.time()
     if now - _balance_cache_time < 10 and _balance_cache:
         return _balance_cache
     try:
         pb = _get_private_binance(username) if username else None
-        if pb:
-            bal = _run_with_timeout(
-                lambda: pb.fetch_balance(params={"type": "swap"}), 5)
-            if bal:
-                _balance_cache = bal
-                _balance_cache_time = now
-                return bal
-    except Exception:
-        pass
+        if pb is None:
+            if username:
+                print(f"[余额] {username}: 无私有客户端 (API密钥未配置或创建失败)")
+            return _balance_cache or {}
+        bal = _run_with_timeout(
+            lambda: pb.fetch_balance(params={"type": "swap"}), 8)
+        if bal:
+            _balance_cache = bal
+            _balance_cache_time = now
+            usdt = bal.get("USDT", {})
+            total = float(usdt.get("total", 0) or 0)
+            print(f"[余额] {username}: 合约账户 = {total}U")
+            return bal
+        else:
+            print(f"[余额] {username}: fetch_balance 超时或返回空 (代理通吗? VPN开了吗?)")
+    except Exception as e:
+        print(f"[余额] {username}: 获取失败 - {type(e).__name__}: {e}")
+        _binance_ok = False
     return _balance_cache or {}
 
 
