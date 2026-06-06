@@ -216,3 +216,29 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ============================================================
+# 项目特定忽略
+# ============================================================
+
+# 用户 API 密钥和密码（每个用户目录下的 .env 含交易所私钥）
+user_data/*/.env
+strategy_password.json
+
+# 运行时状态文件（自动生成，每台服务器独立，不需版本控制）
+strategy_state.json
+trades.json
+watchlist.json
+*.db-journal
+
+# Excel 临时文件（Microsoft Office 锁文件）
+~$*.xlsx
+~$*.xls
+
+# 策略机器人运行时日志
+bot.log
+strategy.log
+trade_history.log
+
+# SQLite 数据库（启动时自动生成，含用户凭据）
+accounts.db
